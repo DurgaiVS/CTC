@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <vector>
+
 #include "./constants.hh"
 
 template<typename T>

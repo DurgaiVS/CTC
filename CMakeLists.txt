@@ -10,7 +10,6 @@ endif()
 
 add_compile_options(-Wall -pedantic -fPIC)
 
-include_directories(${CMAKE_SOURCE_DIR}/include)
 
 include(FetchContent)
 FetchContent_Declare(
@@ -19,9 +18,11 @@ FetchContent_Declare(
     GIT_TAG v2.10.4
 )
 FetchContent_MakeAvailable(pybind11)
+# add_directory(pybind11)
 
 pybind11_add_module(_zctc SHARED ${CMAKE_SOURCE_DIR}/src/binding.cpp)
-add_executable(zctc ${CMAKE_SOURCE_DIR}/src/main.cpp)
+include_directories(${CMAKE_SOURCE_DIR}/include ${pybind11_INCLUDE_DIR})
+# add_executable(zctc ${CMAKE_SOURCE_DIR}/src/main.cpp)
 
 install(TARGETS _zctc DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
-install(TARGETS zctc DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
+# install(TARGETS zctc DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)

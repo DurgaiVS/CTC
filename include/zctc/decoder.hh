@@ -2,49 +2,61 @@
 #define _ZCTC_DECODER_H
 
 #include <algorithm>
+
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
+#include <pybind11/numpy.h>
+
 #include "./trie.hh"
+
+namespace py = pybind11;
 
 class Decoder {
 public:
     template <typename T>
     static bool descending_compare(Node<T>* x, Node<T>* y);
 
-    const int blank_id, cutoff_top_n, thread_count;
+    const int thread_count, blank_id, cutoff_top_n, vocab_size;
     const float nucleus_prob_per_timestep;
     const std::size_t beam_width;
 
-    Decoder(int blank_id, std::size_t beam_width, int cutoff_top_n, int thread_count, float nucleus_prob_per_timestep)
-        : blank_id(blank_id),
+    Decoder(int thread_count, int blank_id, int cutoff_top_n, int vocab_size, float nucleus_prob_per_timestep, std::size_t beam_width)
+        : thread_count(thread_count),
+          blank_id(blank_id),
           cutoff_top_n(cutoff_top_n),
-          thread_count(thread_count),
+          vocab_size(vocab_size),
           nucleus_prob_per_timestep(nucleus_prob_per_timestep),
           beam_width(beam_width)
     { }
 
     template <typename T>
     void decode(
-        std::vector<std::vector<T>>& log_logits,
-        std::vector<std::vector<int>>& sorted_ids,
-        std::vector<std::vector<int>>& labels,
-        std::vector<std::vector<int>>& timesteps,
+        py::array_t<T>& log_logits,
+        py::array_t<int>& sorted_ids,
+        py::array_t<int>& labels,
+        py::array_t<int>& timesteps,
         int seq_len
     ) const;
 
-    template <typename T>
-    void batch_decode(
-        std::vector<std::vector<std::vector<T>>>& batch_log_logits,
-        std::vector<std::vector<std::vector<int>>>& batch_sorted_ids,
-        std::vector<std::vector<std::vector<int>>>& batch_labels,
-        std::vector<std::vector<std::vector<int>>>& batch_timesteps,
-        int batch_size,
-        int seq_len
-    ) const {
+    // template <typename T>
+    // void batch_decode(
+    //     py::array_t<T>& batch_log_logits,
+    //     py::array_t<int>& batch_sorted_ids,
+    //     py::array_t<int>& batch_labels,
+    //     py::array_t<int>& batch_timesteps,
+    //     int batch_size,
+    //     int seq_len
+    // ) const {
+    //     auto logits = batch_log_logits.mutable_unchecked();
+    //     auto sorted_ids = batch_sorted_ids.mutable_unchecked<3>();
+    //     auto labels = batch_labels.mutable_unchecked<3>();
+    //     auto timesteps = batch_timesteps.mutable_unchecked<3>();
 
-        for (int i = 0; i < batch_size; i++) {
-            this->decode(batch_log_logits[i], batch_sorted_ids[i], batch_labels[i], batch_timesteps[i], seq_len);
-        }
+    //     for (int i = 0; i < batch_log_logits.shape(0); i++) {
+    //         this->decode(logits(i), sorted_ids(i), labels(i), timesteps(i), seq_len);
+    //     }
 
-    }
+    // }
 
 };
 
@@ -65,12 +77,20 @@ bool Decoder::descending_compare(Node<T>* x, Node<T>* y) {
 
 template <typename T>
 void Decoder::decode(
-        std::vector<std::vector<T>>& log_logits,
-        std::vector<std::vector<int>>& sorted_ids,
-        std::vector<std::vector<int>>& labels,
-        std::vector<std::vector<int>>& timesteps,
+        py::array_t<T>& log_logits,
+        py::array_t<int>& sorted_ids,
+        py::array_t<int>& labels,
+        py::array_t<int>& timesteps,
         int seq_len
-    ) const {
+) const {
+
+    py::buffer_info logits_buf = log_logits.request();
+    py::buffer_info ids_buf = sorted_ids.request();
+    py::buffer_info labels_buf = labels.request();
+    py::buffer_info timesteps_buf = timesteps.request();
+
+    if (logits_buf.ndim != 2 || ids_buf.ndim != 2 || labels_buf.ndim != 2 || timesteps_buf.ndim != 2)
+        throw std::runtime_error("number of dimensions must be two");
 
     T nucleus_max = static_cast<T>(this->nucleus_prob_per_timestep);
     std::vector<Node<T>*> prefixes, tmp;
@@ -80,15 +100,20 @@ void Decoder::decode(
     Node<T> root(_ZCTC_ROOT_ID, -1, static_cast<T>(_ZCTC_ZERO), static_cast<T>(_ZCTC_ZERO), nullptr);
     prefixes.push_back(&root);
 
-    std::vector<T>* log_logit = log_logits.data();
-    std::vector<int>* sorted_id = sorted_ids.data();
     Node<T>* child;
-    for (int timestep = 0; timestep < seq_len; timestep++, log_logit++, sorted_id++) {
+    int *curr_id, *curr_l, *curr_t;
+    int *ids = (int*)ids_buf.ptr, *label = (int*)labels_buf.ptr, *timestep = (int*)timesteps_buf.ptr;
+    T* logits = (T*)logits_buf.ptr;
+    int t_val;
+
+    for (int t = 0; t < seq_len; t++) {
         T nucleus_count = 0;
+        t_val = t * this->vocab_size;
+        curr_id = ids + t_val;
 
         for (int i = 0; i < this->cutoff_top_n; i++) {
-            int index = (*sorted_id)[i];
-            T prob = (*log_logit)[index];
+            int index = *curr_id;
+            T prob = logits[t_val + index];
 
             nucleus_count += prob;
 
@@ -100,24 +125,17 @@ void Decoder::decode(
                 } else if (index == prefix->id) {
                     if (prefix->nb_prob < prob) {
                         prefix->nb_prob = prob;
-                        prefix->timestep = timestep;
+                        prefix->timestep = t;
                     }
                     prefix->update_score();
                 } else {
-                    child = prefix->add_to_child(index, timestep, prob);
+                    child = prefix->add_to_child(index, t, prob);
                     if (child != nullptr) 
                         tmp.push_back(child);
                 }
             }
-            // --- OP ---
 
-            // save the prefixes to a vector, with max size of beam_width
-            // keep sorting in descending and prune nodes which lies out
-            // of the range.
-
-            // Keep adding nodes to this prefix vector, and once a timestep
-            // is over, prune outliers.
-
+            curr_id++;
             if (nucleus_count >= nucleus_max) break;
         }
 
@@ -138,24 +156,36 @@ void Decoder::decode(
 
     std::sort(prefixes.begin(), prefixes.end(), Decoder::descending_compare<T>);
 
-    std::vector<int>* label = labels.data();
-    std::vector<int>* timestep = timesteps.data();
+        /*
+        m.def("increment_3d", [](py::array_t<T> x) {
+        auto r = x.mutable_unchecked<3>(); // Will throw if ndim != 3 or flags.writeable is false
+        for (int i = 0; i < r.shape(0); i++)
+            for (int j = 0; j < r.shape(1); j++)
+                for (int k = 0; k < r.shape(2); k++)
+                    r(i, j, k) += 1.0;
+        }, py::arg().noconvert());
+        */
+
+    // static_assert(this->beam_width == labels_buf.shape[0], "Labels array should be of shape (beam_width X seq_len)");
+    // static_assert(this->beam_width == timesteps_buf.shape[0], "Timesteps array should be of shape (beam_width X seq_len)");
+
+    t_val = 1;
     for (Node<T>* prefix : prefixes) {
-        int* l = (*label).data() + ((*label).size() - 1);
-        int* t = (*timestep).data() + ((*timestep).size() - 1);
+        curr_t = timestep + ((seq_len * t_val) - 1);
+        curr_l = label + ((seq_len * t_val) - 1);
 
         while (prefix->parent != nullptr) {
-            *l = prefix->id;
-            *t = prefix->timestep;
-            l--;
-            t--;
+            *curr_l = prefix->id;
+            *curr_t = prefix->timestep;
+
             // if index becomes less than 0, might throw error
+            curr_l--;
+            curr_t--;
 
             prefix = prefix->parent;
         }
 
-        label++;
-        timestep++;
+        t_val++;
     }
 
 }
