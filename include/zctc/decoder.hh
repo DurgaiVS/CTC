@@ -9,15 +9,16 @@ public:
     template <typename T>
     static bool descending_compare(Node<T>* x, Node<T>* y);
 
-    const int blank_id, beam_width, cutoff_top_n, thread_count;
+    const int blank_id, cutoff_top_n, thread_count;
     const float nucleus_prob_per_timestep;
+    const std::size_t beam_width;
 
-    Decoder(int blank_id, int beam_width, int cutoff_top_n, int thread_count, float nucleus_prob_per_timestep)
+    Decoder(int blank_id, std::size_t beam_width, int cutoff_top_n, int thread_count, float nucleus_prob_per_timestep)
         : blank_id(blank_id),
-          beam_width(beam_width),
           cutoff_top_n(cutoff_top_n),
           thread_count(thread_count),
-          nucleus_prob_per_timestep(nucleus_prob_per_timestep)
+          nucleus_prob_per_timestep(nucleus_prob_per_timestep),
+          beam_width(beam_width)
     { }
 
     template <typename T>
@@ -33,8 +34,8 @@ public:
     void batch_decode(
         std::vector<std::vector<std::vector<T>>>& batch_log_logits,
         std::vector<std::vector<std::vector<int>>>& batch_sorted_ids,
-        std::vector<std::vector<std::vector<int>>> batch_labels,
-        std::vector<std::vector<std::vector<int>>> batch_timesteps,
+        std::vector<std::vector<std::vector<int>>>& batch_labels,
+        std::vector<std::vector<std::vector<int>>>& batch_timesteps,
         int batch_size,
         int seq_len
     ) const {
@@ -136,23 +137,21 @@ void Decoder::decode(
     }
 
     std::sort(prefixes.begin(), prefixes.end(), Decoder::descending_compare<T>);
-    std::vector<int>* label = labels.data();
-    std::vector<int>* timestep = timesteps.data();
 
+    int i = 0, j;
     for (Node<T>* prefix : prefixes) {
-        int* l = (*label).data() + (*label).size();
-        int* t = (*timestep).data() + (*timestep).size();
+        j = labels[i].size() - 1;
 
         while (prefix->parent != nullptr) {
-            *l = prefix->id;
-            *t = prefix->timestep;
-            l--;
-            t--;
+            labels[i][j] = prefix->id;
+            timesteps[i][j] = prefix->timestep;
+            j--;
+            // if i becomes less than 0, might throw error
+
             prefix = prefix->parent;
         }
 
-        label++;
-        timestep++;
+        i++;
     }
 
 }

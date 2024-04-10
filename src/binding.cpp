@@ -3,7 +3,7 @@
 #include <pybind11/stl.h>
 
 PYBIND11_MODULE(_zctc, m) {
-    pybind11::class_<Decoder>(m, "Decoder")
+    pybind11::class_<Decoder>(m, "Decoder", pybind11::call_guard<pybind11::gil_scoped_release>())
        .def(pybind11::init<int, int, int, int, float>())
        .def("batch_decode", &Decoder::batch_decode<float>,
             pybind11::call_guard<pybind11::gil_scoped_release>())

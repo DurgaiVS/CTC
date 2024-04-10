@@ -10,4 +10,4 @@ decoder = Decoder(0, 25, 20, 6, 0.9)
 
 decoder.batch_decode(logits.tolist(), sorted_indices.tolist(), labels, timesteps, logits.shape[0], logits.shape[1])
 
-print(labels)
+print(labels[0][0])
