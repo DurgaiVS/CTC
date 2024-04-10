@@ -138,20 +138,24 @@ void Decoder::decode(
 
     std::sort(prefixes.begin(), prefixes.end(), Decoder::descending_compare<T>);
 
-    int i = 0, j;
+    std::vector<int>* label = labels.data();
+    std::vector<int>* timestep = timesteps.data();
     for (Node<T>* prefix : prefixes) {
-        j = labels[i].size() - 1;
+        int* l = (*label).data() + ((*label).size() - 1);
+        int* t = (*timestep).data() + ((*timestep).size() - 1);
 
         while (prefix->parent != nullptr) {
-            labels[i][j] = prefix->id;
-            timesteps[i][j] = prefix->timestep;
-            j--;
-            // if i becomes less than 0, might throw error
+            *l = prefix->id;
+            *t = prefix->timestep;
+            l--;
+            t--;
+            // if index becomes less than 0, might throw error
 
             prefix = prefix->parent;
         }
 
-        i++;
+        label++;
+        timestep++;
     }
 
 }
