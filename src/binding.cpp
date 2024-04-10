@@ -3,9 +3,9 @@
 PYBIND11_MODULE(_zctc, m) {
     py::class_<Decoder>(m, "Decoder")
        .def(py::init<int, int, int, int, float, py::ssize_t>())
-       .def("decode", &Decoder::decode<float>,
+       .def("batch_decode", &Decoder::batch_decode<float>,
             py::call_guard<py::gil_scoped_release>())
-       .def("decode", &Decoder::decode<double>,
+       .def("batch_decode", &Decoder::batch_decode<double>,
             py::call_guard<py::gil_scoped_release>())
        .def_readonly("blank_id", &Decoder::blank_id)
        .def_readonly("beam_width", &Decoder::beam_width)

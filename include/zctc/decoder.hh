@@ -31,32 +31,40 @@ public:
 
     template <typename T>
     void decode(
-        py::array_t<T>& log_logits,
-        py::array_t<int>& sorted_ids,
-        py::array_t<int>& labels,
-        py::array_t<int>& timesteps,
-        int seq_len
+        T* log_logits,
+        int* sorted_ids,
+        int* labels,
+        int* timesteps,
+        const int seq_len
     ) const;
 
-    // template <typename T>
-    // void batch_decode(
-    //     py::array_t<T>& batch_log_logits,
-    //     py::array_t<int>& batch_sorted_ids,
-    //     py::array_t<int>& batch_labels,
-    //     py::array_t<int>& batch_timesteps,
-    //     int batch_size,
-    //     int seq_len
-    // ) const {
-    //     auto logits = batch_log_logits.mutable_unchecked();
-    //     auto sorted_ids = batch_sorted_ids.mutable_unchecked<3>();
-    //     auto labels = batch_labels.mutable_unchecked<3>();
-    //     auto timesteps = batch_timesteps.mutable_unchecked<3>();
 
-    //     for (int i = 0; i < batch_log_logits.shape(0); i++) {
-    //         this->decode(logits(i), sorted_ids(i), labels(i), timesteps(i), seq_len);
-    //     }
+    template <typename T>
+    void batch_decode(
+        py::array_t<T>& batch_log_logits,
+        py::array_t<int>& batch_sorted_ids,
+        py::array_t<int>& batch_labels,
+        py::array_t<int>& batch_timesteps,
+        const int batch_size,
+        const int seq_len
+    ) const {
+        py::buffer_info logits_buf = batch_log_logits.request();
+        py::buffer_info ids_buf = batch_sorted_ids.request();
+        py::buffer_info labels_buf = batch_labels.request();
+        py::buffer_info timesteps_buf = batch_timesteps.request();
 
-    // }
+        if (logits_buf.ndim != 3 || ids_buf.ndim != 3 || labels_buf.ndim != 3 || timesteps_buf.ndim != 3)
+            throw std::runtime_error("Number of dimensions must be three");
+
+        int *ids = (int*)ids_buf.ptr, *labels = (int*)labels_buf.ptr, *timesteps = (int*)timesteps_buf.ptr;
+        T* logits = (T*)logits_buf.ptr;
+
+        for (int i = 0, pos = 0; i < batch_size; i++) {
+            pos = i * (seq_len * this->vocab_size);
+            this->decode(logits + pos, ids + pos, labels + pos, timesteps + pos, seq_len);
+        }
+
+    }
 
 };
 
@@ -77,20 +85,20 @@ bool Decoder::descending_compare(Node<T>* x, Node<T>* y) {
 
 template <typename T>
 void Decoder::decode(
-        py::array_t<T>& log_logits,
-        py::array_t<int>& sorted_ids,
-        py::array_t<int>& labels,
-        py::array_t<int>& timesteps,
-        int seq_len
+    T* logits,
+    int* ids,
+    int* label,
+    int* timestep,
+    const int seq_len
 ) const {
 
-    py::buffer_info logits_buf = log_logits.request();
-    py::buffer_info ids_buf = sorted_ids.request();
-    py::buffer_info labels_buf = labels.request();
-    py::buffer_info timesteps_buf = timesteps.request();
+    // py::buffer_info logits_buf = log_logits.request();
+    // py::buffer_info ids_buf = sorted_ids.request();
+    // py::buffer_info labels_buf = labels.request();
+    // py::buffer_info timesteps_buf = timesteps.request();
 
-    if (logits_buf.ndim != 2 || ids_buf.ndim != 2 || labels_buf.ndim != 2 || timesteps_buf.ndim != 2)
-        throw std::runtime_error("number of dimensions must be two");
+    // if (logits_buf.ndim != 2 || ids_buf.ndim != 2 || labels_buf.ndim != 2 || timesteps_buf.ndim != 2)
+    //     throw std::runtime_error("number of dimensions must be two");
 
     T nucleus_max = static_cast<T>(this->nucleus_prob_per_timestep);
     std::vector<Node<T>*> prefixes, tmp;
@@ -102,8 +110,8 @@ void Decoder::decode(
 
     Node<T>* child;
     int *curr_id, *curr_l, *curr_t;
-    int *ids = (int*)ids_buf.ptr, *label = (int*)labels_buf.ptr, *timestep = (int*)timesteps_buf.ptr;
-    T* logits = (T*)logits_buf.ptr;
+    // int *ids = (int*)ids_buf.ptr, *label = (int*)labels_buf.ptr, *timestep = (int*)timesteps_buf.ptr;
+    // T* logits = (T*)logits_buf.ptr;
     int t_val;
 
     for (int t = 0; t < seq_len; t++) {
