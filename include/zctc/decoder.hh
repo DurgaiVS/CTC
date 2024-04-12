@@ -58,9 +58,10 @@ public:
         int *ids = (int*)ids_buf.ptr, *labels = (int*)labels_buf.ptr, *timesteps = (int*)timesteps_buf.ptr;
         T* logits = (T*)logits_buf.ptr;
 
-        for (int i = 0, pos = 0; i < batch_size; i++) {
-            pos = i * (seq_len * this->vocab_size);
-            this->decode(logits + pos, ids + pos, labels + pos, timesteps + pos, seq_len);
+        for (int i = 0, ip_pos = 0, op_pos = 0; i < batch_size; i++) {
+            ip_pos = i * seq_len * this->vocab_size;
+            op_pos = i * this->beam_width * seq_len;
+            this->decode(logits + ip_pos, ids + ip_pos, labels + op_pos, timesteps + op_pos, seq_len);
         }
 
     }
@@ -150,16 +151,6 @@ void Decoder::decode(
     }
 
     std::sort(prefixes.begin(), prefixes.end(), Decoder::descending_compare<T>);
-
-        /*
-        m.def("increment_3d", [](py::array_t<T> x) {
-        auto r = x.mutable_unchecked<3>(); // Will throw if ndim != 3 or flags.writeable is false
-        for (int i = 0; i < r.shape(0); i++)
-            for (int j = 0; j < r.shape(1); j++)
-                for (int k = 0; k < r.shape(2); k++)
-                    r(i, j, k) += 1.0;
-        }, py::arg().noconvert());
-        */
 
     t_val = 1;
     for (Node<T>* prefix : prefixes) {

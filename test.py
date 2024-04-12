@@ -61,12 +61,9 @@ if __name__ == "__main__":
 
     print("New-CTC:", end - start, "seconds")
     try:
-        print(torch.all(op_old[op_old > 0] == op_new[op_new > 0]))
+        print(torch.all(op_old[op_old > 0.5] == op_new[op_new > 0.5]))
     except Exception:
-        print(op_new, "\n", op_old[0], "\n", torch.argmax(logits, dim=2), end="\nERROR\n")
+        print(logits, "\n", sorted_indices, "\n", op_old[0])
+        # print(op_new[1], "\n", op_old[1][0], "\n", torch.argmax(logits, dim=2)[1], "\n", sorted_indices[1][:,0], end="\nERROR\n")
     else:
-        print(op_new, "\n", op_old[0], "\n", torch.argmax(logits, dim=2), end="\nEND\n")
-
-    # print(logits, "\n", sorted_indices)
-
-    # check if sorting is happening as ascending    
+        print(op_new[0], "\n", op_old[0][0], "\n", torch.argmax(logits, dim=2)[0], "\n", sorted_indices[0][:,0], end="\nEND\n")

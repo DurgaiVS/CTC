@@ -1,7 +1,7 @@
 #include "zctc/decoder.hh"
 
 PYBIND11_MODULE(_zctc, m) {
-    py::class_<Decoder>(m, "Decoder")
+     py::class_<Decoder>(m, "Decoder")
        .def(py::init<int, int, int, int, float, py::ssize_t>())
        .def("batch_decode", &Decoder::batch_decode<float>,
             py::call_guard<py::gil_scoped_release>())

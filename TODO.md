@@ -1,3 +1,12 @@
+V3:
+- when repetition handling, if the prob is less, we are not updating the node's prob,
+    but this way, lesser prob class is overtaking the squashed prob, and misleading
+    the output seq.
+- when repetition handling, if the prob is greater, we are updating the timestep and
+    changing the prob to (at t value), and also we are adding child to it, which might
+    be misleading, like, at t=5 node, we found repetition and updated "t" to 6, also
+    another class is getting added to this node
+
 V2:
 
 - hotwords inference should be similar to language model inference
