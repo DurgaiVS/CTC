@@ -12,16 +12,15 @@ public:
 
     bool still_in_prefixes;
     int id, timestep;
-    T b_prob, nb_prob, parent_scr, lm_prob, score;
+    T prob, parent_scr, lm_prob, score;
     Node<T>* parent;
     std::vector<Node<T>*> childs;
 
-    Node(int id, int timestep, T b_prob, T nb_prob, Node<T>* parent)
+    Node(int id, int timestep, T prob, Node<T>* parent)
         : still_in_prefixes(true),
           id(id),
           timestep(timestep),
-          b_prob(b_prob),
-          nb_prob(nb_prob),
+          prob(prob),
           parent_scr(static_cast<T>(_ZCTC_ZERO)),
           lm_prob(static_cast<T>(_ZCTC_ZERO)),
           score(static_cast<T>(_ZCTC_ZERO)),
@@ -29,6 +28,8 @@ public:
     {
         if (this->parent != nullptr)
             this->parent_scr = parent->score;
+
+        this->update_score();
     }
 
     ~Node() {
@@ -36,7 +37,6 @@ public:
             delete child;
     }
 
-    void stash_node();
     inline void update_score() noexcept;
 
     void get_full_path(std::vector<int>& labels, std::vector<int>& timesteps);
@@ -56,43 +56,25 @@ template <typename T>
 Node<T>* Node<T>::add_to_child(int id, int timestep, T prob) {
     for (Node<T>* child : *this) {
         if (id == child->id) {
-            if (child->nb_prob < prob) {
-                child->nb_prob = prob;
+            if (child->prob < prob) {
+                child->prob = prob;
                 child->timestep = timestep;
 
                 child->update_score();
 
             }
-            return nullptr;
+            return child;
         }
     }
-    Node<T>* child = new Node<T>(id, timestep, static_cast<T>(_ZCTC_ZERO), prob, this);
+    Node<T>* child = new Node<T>(id, timestep, prob, this);
     this->childs.push_back(child);
 
     return child;
 }
 
 template <typename T>
-void Node<T>::stash_node() {
-    this->still_in_prefixes = false;
-
-    if (this->childs.size() != 0) return;
-
-    this->parent->childs.erase(
-        std::remove_if(this->parent->childs.begin(), this->parent->childs.end(), [&](Node<T>* child) {
-            return this->id == child->id;
-        })
-    );
-
-    // if (this->parent->childs.size() == 0) // !this->parent->still_in_prefixes && (check once if this is needed)
-    //     this->parent->stash_node();
-
-    delete this;
-}
-
-template <typename T>
 void Node<T>::update_score() noexcept {
-    this->score = this->parent_scr + this->b_prob + this->nb_prob + this->lm_prob;
+    this->score = this->parent_scr + this->prob + this->lm_prob;
 }
 
 template <typename T>

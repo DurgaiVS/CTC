@@ -38,7 +38,6 @@ public:
         const int seq_len
     ) const;
 
-
     template <typename T>
     void batch_decode(
         py::array_t<T>& batch_log_logits,
@@ -72,15 +71,7 @@ public:
 
 template <typename T>
 bool Decoder::descending_compare(Node<T>* x, Node<T>* y) {
-    if (x->score == y->score) {
-        if (x->id == y->id) {
-            return false;
-        } else {
-            return (x->id < y->id);
-        }
-    } else {
-        return x->score > y->score;
-    }
+    return x->score > y->score;
 }
 
 template <typename T>
@@ -92,26 +83,16 @@ void Decoder::decode(
     const int seq_len
 ) const {
 
-    // py::buffer_info logits_buf = log_logits.request();
-    // py::buffer_info ids_buf = sorted_ids.request();
-    // py::buffer_info labels_buf = labels.request();
-    // py::buffer_info timesteps_buf = timesteps.request();
-
-    // if (logits_buf.ndim != 2 || ids_buf.ndim != 2 || labels_buf.ndim != 2 || timesteps_buf.ndim != 2)
-    //     throw std::runtime_error("number of dimensions must be two");
-
     T nucleus_max = static_cast<T>(this->nucleus_prob_per_timestep);
     std::vector<Node<T>*> prefixes, tmp;
     prefixes.reserve(this->beam_width);
     tmp.reserve(this->beam_width);
 
-    Node<T> root(_ZCTC_ROOT_ID, -1, static_cast<T>(_ZCTC_ZERO), static_cast<T>(_ZCTC_ZERO), nullptr);
+    Node<T> root(_ZCTC_ROOT_ID, -1, static_cast<T>(_ZCTC_ZERO), nullptr);
     prefixes.push_back(&root);
 
     Node<T>* child;
     int *curr_id, *curr_l, *curr_t;
-    // int *ids = (int*)ids_buf.ptr, *label = (int*)labels_buf.ptr, *timestep = (int*)timesteps_buf.ptr;
-    // T* logits = (T*)logits_buf.ptr;
     int t_val;
 
     for (int t = 0; t < seq_len; t++) {
@@ -119,7 +100,7 @@ void Decoder::decode(
         t_val = t * this->vocab_size;
         curr_id = ids + t_val;
 
-        for (int i = 0; i < this->cutoff_top_n; i++) {
+        for (int i = 0; i < this->cutoff_top_n; i++, curr_id++) {
             int index = *curr_id;
             T prob = logits[t_val + index];
 
@@ -127,39 +108,45 @@ void Decoder::decode(
 
             for (Node<T>* prefix : prefixes) {
 
-                if (index == this->blank_id) {
-                    prefix->b_prob += prob;
-                    prefix->update_score();
-                } else if (index == prefix->id) {
-                    if (prefix->nb_prob < prob) {
-                        prefix->nb_prob = prob;
+                if (index == prefix->id) {
+
+                    if (prefix->prob < prob) {
+                        prefix->prob = prob;
                         prefix->timestep = t;
+
+                        prefix->update_score();
                     }
-                    prefix->update_score();
+                    tmp.push_back(prefix);
+                    continue;
+
                 } else {
-                    child = prefix->add_to_child(index, t, prob);
-                    if (child != nullptr) 
-                        tmp.push_back(child);
+
+                    child = prefix->add_to_child(index, t, prob); 
+                    tmp.push_back(child);
+                    continue;
+
                 }
             }
 
-            curr_id++;
             if (nucleus_count >= nucleus_max) break;
         }
 
-        std::copy(tmp.begin(), tmp.end(), std::back_inserter(prefixes));
+        prefixes.clear();
+
+        if (tmp.size() < this->beam_width) {
+            std::copy(tmp.begin(), tmp.end(), std::back_inserter(prefixes));
+
+            tmp.clear();
+            continue;
+        }
+
+        std::nth_element(tmp.begin(), tmp.begin() + this->beam_width, tmp.end(), Decoder::descending_compare<T>);
+
+        
+        std::copy_n(tmp.begin(), this->beam_width, std::back_inserter(prefixes));
         tmp.clear();
         tmp.reserve(this->beam_width);
 
-        if (prefixes.size() < this->beam_width)
-            continue;
-
-        std::nth_element(prefixes.begin(), prefixes.begin() + this->beam_width, prefixes.end(), Decoder::descending_compare<T>);
-        std::for_each(prefixes.begin() + this->beam_width, prefixes.end(), [&](Node<T>* node) {
-            node->stash_node();
-        });
-
-        prefixes.erase(prefixes.begin() + this->beam_width, prefixes.end());
     }
 
     std::sort(prefixes.begin(), prefixes.end(), Decoder::descending_compare<T>);
@@ -173,9 +160,6 @@ void Decoder::decode(
                     r(i, j, k) += 1.0;
         }, py::arg().noconvert());
         */
-
-    // static_assert(this->beam_width == labels_buf.shape[0], "Labels array should be of shape (beam_width X seq_len)");
-    // static_assert(this->beam_width == timesteps_buf.shape[0], "Timesteps array should be of shape (beam_width X seq_len)");
 
     t_val = 1;
     for (Node<T>* prefix : prefixes) {

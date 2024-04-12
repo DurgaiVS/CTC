@@ -3,3 +3,4 @@ bin/
 lib/
 __pycache__/
 *whl
+build/
