@@ -39,7 +39,6 @@ public:
 
     inline void update_score() noexcept;
 
-    void get_full_path(std::vector<int>& labels, std::vector<int>& timesteps);
     void get_prefixes(int count, int* suffixes, int pad_tok_id);
     Node<T>* add_to_child(int id, int timestep, T prob);
 
@@ -54,20 +53,21 @@ public:
 
 template <typename T>
 Node<T>* Node<T>::add_to_child(int id, int timestep, T prob) {
-    for (Node<T>* child : *this) {
-        if (id == child->id) {
-            if (child->prob < prob) {
-                child->prob = prob;
-                child->timestep = timestep;
 
-                child->update_score();
-
-            }
-            return child;
-        }
-    }
     Node<T>* child = new Node<T>(id, timestep, prob, this);
-    this->childs.push_back(child);
+
+    if (id == this->id) {
+
+        child->parent = this->parent;
+        child->lm_prob = this->lm_prob;
+        child->update_score();
+        this->parent->childs.push_back(child);
+
+    } else {
+
+        this->childs.push_back(child);
+
+    }
 
     return child;
 }
@@ -75,20 +75,6 @@ Node<T>* Node<T>::add_to_child(int id, int timestep, T prob) {
 template <typename T>
 void Node<T>::update_score() noexcept {
     this->score = this->parent_scr + this->prob + this->lm_prob;
-}
-
-template <typename T>
-void Node<T>::get_full_path(std::vector<int>& labels, std::vector<int>& timesteps) {
-    labels.push_back(this->id);
-    timesteps.push_back(this->timestep);
-
-    if (this->parent == nullptr) {
-        std::reverse(labels.begin(), labels.end());
-        std::reverse(timesteps.begin(), timesteps.end());
-        return;
-    }
-
-    return this->parent->get_full_path(labels, timesteps);
 }
 
 template <typename T>

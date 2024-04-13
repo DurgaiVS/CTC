@@ -4,13 +4,14 @@ version = "0.1.0"
 description = "CLI tool to build, parse or generate new fst files from the tokenized vocab"
 authors = ["durgaivelselvan.mn <durgaivelselvan.mn@zohocorp.com>"]
 readme = "README.md"
+build = "build.py"
 
 [tool.poetry.dependencies]
 python = ">=3.9,<3.12"
-torch = ">=2.0"
+torch = ">=2.1"
 
 [tool.poetry.dev-dependencies]
 
 [build-system]
-requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
+requires = ["setuptools", "wheel", "poetry-core>=1.0.0"]

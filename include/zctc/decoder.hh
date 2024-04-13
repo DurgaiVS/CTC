@@ -94,39 +94,24 @@ void Decoder::decode(
 
     Node<T>* child;
     int *curr_id, *curr_l, *curr_t;
-    int t_val;
+    int iter_val;
 
     for (int t = 0; t < seq_len; t++) {
         T nucleus_count = 0;
-        t_val = t * this->vocab_size;
-        curr_id = ids + t_val;
+        iter_val = t * this->vocab_size;
+        curr_id = ids + iter_val;
 
         for (int i = 0; i < this->cutoff_top_n; i++, curr_id++) {
             int index = *curr_id;
-            T prob = logits[t_val + index];
+            T prob = logits[iter_val + index];
 
             nucleus_count += prob;
 
             for (Node<T>* prefix : prefixes) {
 
-                if (index == prefix->id) {
+                child = prefix->add_to_child(index, t, prob); 
+                tmp.push_back(child);
 
-                    if (prefix->prob < prob) {
-                        prefix->prob = prob;
-                        prefix->timestep = t;
-
-                        prefix->update_score();
-                    }
-                    tmp.push_back(prefix);
-                    continue;
-
-                } else {
-
-                    child = prefix->add_to_child(index, t, prob); 
-                    tmp.push_back(child);
-                    continue;
-
-                }
             }
 
             if (nucleus_count >= nucleus_max) break;
@@ -146,16 +131,15 @@ void Decoder::decode(
         
         std::copy_n(tmp.begin(), this->beam_width, std::back_inserter(prefixes));
         tmp.clear();
-        tmp.reserve(this->beam_width);
 
     }
 
     std::sort(prefixes.begin(), prefixes.end(), Decoder::descending_compare<T>);
 
-    t_val = 1;
+    iter_val = 1;
     for (Node<T>* prefix : prefixes) {
-        curr_t = timestep + ((seq_len * t_val) - 1);
-        curr_l = label + ((seq_len * t_val) - 1);
+        curr_t = timestep + ((seq_len * iter_val) - 1);
+        curr_l = label + ((seq_len * iter_val) - 1);
 
         while (prefix->parent != nullptr) {
             *curr_l = prefix->id;
@@ -168,7 +152,7 @@ void Decoder::decode(
             prefix = prefix->parent;
         }
 
-        t_val++;
+        iter_val++;
     }
 
 }
