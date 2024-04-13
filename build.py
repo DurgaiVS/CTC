@@ -43,7 +43,6 @@ class CMakeBuild(build_ext):
             '-DPYTHON_INCLUDE_DIR=' + str(get_paths()['include']),
             '-DPYTHON_EXECUTABLE=' + str(sys.executable),
             '-DCMAKE_INSTALL_PREFIX=' + str(src_dir / "zctc"),
-            '-DCMAKE_SOURCE_DIR=' + str(src_dir)
         ]
 
         # example of build args

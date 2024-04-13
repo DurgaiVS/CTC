@@ -1,6 +1,8 @@
 .vscode
-bin/
-lib/
+zctc/bin/
+zctc/lib/
+zctc/include/
+zctc/
 __pycache__/
 *whl
 build/
