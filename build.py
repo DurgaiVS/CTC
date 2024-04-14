@@ -48,7 +48,7 @@ class CMakeBuild(build_ext):
         # example of build args
         build_args = [
             '--config', config,
-            '--', '-j' + str(max(os.cpu_count() // 2, 1))
+            '--', '-j' + str(os.cpu_count())
         ]
 
         subprocess.run(

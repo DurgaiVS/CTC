@@ -1,9 +1,13 @@
 #! /usr/bin/env python
 
 import os
+import requests
 import sys
 import subprocess
+import tarfile
 
+from tempfile import TemporaryDirectory
+from io import BytesIO
 from pathlib import Path
 from sysconfig import get_paths
 from setuptools import setup, Extension, find_packages
@@ -25,7 +29,7 @@ class CMakeBuild(build_ext):
             self.build_extension(ext)
 
     def build_extension(self, ext: CMakeExtension):
-        cwd = Path().absolute()
+
         src_dir = ext.sourcedir
 
         # these dirs will be created in build_py, so if you don't have
@@ -35,6 +39,14 @@ class CMakeBuild(build_ext):
         extdir = Path(self.get_ext_fullpath(ext.name))
         extdir.mkdir(parents=True, exist_ok=True)
 
+        fst_v = "openfst-1.8.3"
+        fst_url = f"https://www.openfst.org/twiki/pub/FST/FstDownload/{fst_v}.tar.gz"
+        tmp_dir = TemporaryDirectory()
+        res = requests.get(fst_url)
+        with tarfile.open(fileobj=BytesIO(res.content)) as tar:
+            tar.extractall(tmp_dir.name)
+        del res
+
         # example of cmake args
         config = 'Debug' if self.debug else 'Release'
         cmake_args = [
@@ -43,12 +55,13 @@ class CMakeBuild(build_ext):
             '-DPYTHON_INCLUDE_DIR=' + str(get_paths()['include']),
             '-DPYTHON_EXECUTABLE=' + str(sys.executable),
             '-DCMAKE_INSTALL_PREFIX=' + str(src_dir / "zctc"),
+            '-DFST_DIR=' + str(Path(tmp_dir.name) / fst_v)
         ]
 
         # example of build args
         build_args = [
             '--config', config,
-            '--', '-j' + str(max(os.cpu_count() // 2, 1))
+            '--', '-j' + str(os.cpu_count())
         ]
 
         subprocess.run(
@@ -58,6 +71,7 @@ class CMakeBuild(build_ext):
             ["cmake", "--build", ".", "--target", "install", *build_args], cwd=build_temp, check=True
         )
 
+        tmp_dir.cleanup()
         # os.remove(build_temp)
         # os.remove(src_dir / os.path.join("zctc", "include"))
         # os.remove(src_dir / os.path.join("zctc", "bin"))

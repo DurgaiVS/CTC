@@ -62,7 +62,7 @@ int main(int argc, char** argv) {
     std::vector<int> labels(12, 0);
     std::vector<int> timesteps(12, 0);
 
-    Decoder decoder(1, 0, 8, 8, 0.9, 1);
+    zctc::Decoder decoder(1, 0, 8, 8, 0.9, 1);
     decoder.decode(logits.data(), sorted_indices.data(), labels.data(), timesteps.data(), 12);
 
     for (int i = 0; i < 12; i++)

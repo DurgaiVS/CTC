@@ -2,9 +2,12 @@
 #define _ZCTC_TRIE_H
 
 #include <algorithm>
+#include <string>
 #include <vector>
 
 #include "./constants.hh"
+
+namespace zctc {
 
 template<typename T>
 class Node {
@@ -14,20 +17,32 @@ public:
     int id, timestep;
     T prob, parent_scr, lm_prob, score;
     Node<T>* parent;
+    std::vector<std::string> n_tokens;
     std::vector<Node<T>*> childs;
 
-    Node(int id, int timestep, T prob, Node<T>* parent)
+    Node(int id, int timestep, T prob, Node<T>* parent, int context_size, bool is_repeat_node)
         : still_in_prefixes(true),
           id(id),
           timestep(timestep),
           prob(prob),
-          parent_scr(static_cast<T>(_ZCTC_ZERO)),
-          lm_prob(static_cast<T>(_ZCTC_ZERO)),
-          score(static_cast<T>(_ZCTC_ZERO)),
+          parent_scr(static_cast<T>(zctc::ZERO)),
+          lm_prob(static_cast<T>(zctc::ZERO)),
+          score(static_cast<T>(zctc::ZERO)),
           parent(parent)
     {
-        if (this->parent != nullptr)
-            this->parent_scr = parent->score;
+        if (this->parent == nullptr) {
+            this->n_tokens.resize(context_size, "<s>");
+            return;
+        }
+
+        this->parent_scr = parent->score;
+        if (is_repeat_node) {
+            return;
+        } 
+
+        this->n_tokens.reserve(context_size);
+        std::copy_n(this->parent->n_tokens.begin() + 1, context_size, this->n_tokens.begin());
+        // this->n_tokens[context_size] = this->id_to_tok;
 
         this->update_score();
     }
@@ -38,9 +53,9 @@ public:
     }
 
     inline void update_score() noexcept;
+    inline void start_token_check() noexcept;
 
-    void get_prefixes(int count, int* suffixes, int pad_tok_id);
-    Node<T>* add_to_child(int id, int timestep, T prob);
+    Node<T>* add_to_child(int id, int timestep, T prob, int context_size);
 
     // element-wise iterator for this class,
     typename std::vector<Node<T>*>::iterator begin() noexcept { return this->childs.begin(); }
@@ -49,22 +64,40 @@ public:
     typename std::vector<Node<T>*>::const_iterator cend() const noexcept { return this->childs.cend(); }
 };
 
+} // namespace zctc
+
+
 /* ---------------------------------------------------------------------------- */
 
-template <typename T>
-Node<T>* Node<T>::add_to_child(int id, int timestep, T prob) {
 
-    Node<T>* child = new Node<T>(id, timestep, prob, this);
+template <typename T>
+void zctc::Node<T>::update_score() noexcept {
+    this->score = this->parent_scr + this->prob + this->lm_prob;
+}
+
+template <typename T>
+void zctc::Node<T>::start_token_check() noexcept {
+    // ...;
+}
+
+template <typename T>
+zctc::Node<T>* zctc::Node<T>::add_to_child(int id, int timestep, T prob, int context_size) {
+
+    Node<T>* child;
 
     if (id == this->id) {
-
-        child->parent = this->parent;
+        
+        child = new Node<T>(id, timestep, prob + this->prob, this->parent, context_size, true);
         child->lm_prob = this->lm_prob;
+
         child->update_score();
+
+        child->n_tokens = this->n_tokens;
         this->parent->childs.push_back(child);
 
     } else {
 
+        child = new Node<T>(id, timestep, prob, this, context_size, false);
         this->childs.push_back(child);
 
     }
@@ -72,22 +105,5 @@ Node<T>* Node<T>::add_to_child(int id, int timestep, T prob) {
     return child;
 }
 
-template <typename T>
-void Node<T>::update_score() noexcept {
-    this->score = this->parent_scr + this->prob + this->lm_prob;
-}
-
-template <typename T>
-void Node<T>::get_prefixes(int count, int* suffixes, int pad_tok_id) {
-    Node<T>* temp = this;
-    for (; count > 0; count--) {
-        if (temp->id == _ZCTC_ROOT_ID) {
-            suffixes[count] = pad_tok_id;
-        } else {
-            suffixes[count] = temp->id;
-            temp = temp->parent;
-        }
-    }
-}
 
 #endif // _ZCTC_TRIE_H

@@ -11,14 +11,18 @@
 
 namespace py = pybind11;
 
+namespace zctc {
+
 class Decoder {
 public:
     template <typename T>
-    static bool descending_compare(Node<T>* x, Node<T>* y);
+    static bool descending_compare(zctc::Node<T>* x, zctc::Node<T>* y);
 
     const int thread_count, blank_id, cutoff_top_n, vocab_size;
     const float nucleus_prob_per_timestep;
     const std::size_t beam_width;
+
+    int n_gram, n_context;
 
     Decoder(int thread_count, int blank_id, int cutoff_top_n, int vocab_size, float nucleus_prob_per_timestep, std::size_t beam_width)
         : thread_count(thread_count),
@@ -68,15 +72,18 @@ public:
 
 };
 
+} // namespace zctc
+
 /* ---------------------------------------------------------------------------- */
 
+
 template <typename T>
-bool Decoder::descending_compare(Node<T>* x, Node<T>* y) {
+bool zctc::Decoder::descending_compare(zctc::Node<T>* x, zctc::Node<T>* y) {
     return x->score > y->score;
 }
 
 template <typename T>
-void Decoder::decode(
+void zctc::Decoder::decode(
     T* logits,
     int* ids,
     int* label,
@@ -85,14 +92,14 @@ void Decoder::decode(
 ) const {
 
     T nucleus_max = static_cast<T>(this->nucleus_prob_per_timestep);
-    std::vector<Node<T>*> prefixes, tmp;
+    std::vector<zctc::Node<T>*> prefixes, tmp;
     prefixes.reserve(this->beam_width);
     tmp.reserve(this->beam_width);
 
-    Node<T> root(_ZCTC_ROOT_ID, -1, static_cast<T>(_ZCTC_ZERO), nullptr);
+    zctc::Node<T> root(zctc::ROOT_ID, -1, static_cast<T>(zctc::ZERO), nullptr, this->n_context, false);
     prefixes.push_back(&root);
 
-    Node<T>* child;
+    zctc::Node<T>* child;
     int *curr_id, *curr_l, *curr_t;
     int iter_val;
 
@@ -107,9 +114,9 @@ void Decoder::decode(
 
             nucleus_count += prob;
 
-            for (Node<T>* prefix : prefixes) {
+            for (zctc::Node<T>* prefix : prefixes) {
 
-                child = prefix->add_to_child(index, t, prob); 
+                child = prefix->add_to_child(index, t, prob, this->n_context); 
                 tmp.push_back(child);
 
             }
@@ -137,7 +144,7 @@ void Decoder::decode(
     std::sort(prefixes.begin(), prefixes.end(), Decoder::descending_compare<T>);
 
     iter_val = 1;
-    for (Node<T>* prefix : prefixes) {
+    for (zctc::Node<T>* prefix : prefixes) {
         curr_t = timestep + ((seq_len * iter_val) - 1);
         curr_l = label + ((seq_len * iter_val) - 1);
 
