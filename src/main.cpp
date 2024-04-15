@@ -45,7 +45,7 @@ int main(int argc, char** argv) {
     std::vector<int> labels(12, 0);
     std::vector<int> timesteps(12, 0);
 
-    zctc::Decoder decoder(1, 0, 15, 0.9, 10, -5.0, '#', "/home/durga-17532/zspeech/inference/clients/python/zspeech/inference/resources/models/lm/kenlm/model.bin", "/home/durga-17532/zspeech/inference/clients/python/zspeech/inference/resources/models/spell_checker/en/lexicon.fst.opt", "/home/durga-17532/zspeech/datasets/vocab/asr_training/train_wpe_512.txt");
+    zctc::Decoder decoder(1, 0, 15, 0.9, 10, -5.0, '#', "LM_PATH", "LEXICON_PATH", "TOKENIZER_PATH");
     decoder.decode(logits.data(), sorted_indices.data(), labels.data(), timesteps.data(), 2);
 
     for (int i = 0; i < 12; i++)
