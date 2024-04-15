@@ -21,7 +21,7 @@ fi
 fst_v="openfst-1.8.3"
 fst_url="https://www.openfst.org/twiki/pub/FST/FstDownload/$fst_v.tar.gz"
 
-# wget $fst_url
+wget $fst_url
 tar -xzf $fst_v.tar.gz
 
 cmake -B ./build -DPYTHON_EXECUTABLE:PATH="$(command -v python)" -DCMAKE_INSTALL_PREFIX:PATH="$(realpath ./zctc)" \
@@ -32,6 +32,6 @@ cd build || exit
 make "-j$WORKER" && make install
 
 cd .. || exit 0
-rm -rf ./build ./$fst_v
+rm -rf ./build ./$fst_v ./$fst_v.tar.gz
 
 cd $PWD
