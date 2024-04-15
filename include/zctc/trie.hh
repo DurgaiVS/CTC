@@ -2,8 +2,10 @@
 #define _ZCTC_TRIE_H
 
 #include <algorithm>
-#include <string>
 #include <vector>
+
+#include "fst/fstlib.h"
+#include "lm/state.hh"
 
 #include "./constants.hh"
 
@@ -13,38 +15,31 @@ template<typename T>
 class Node {
 public:
 
-    bool still_in_prefixes;
+    bool arc_exist, is_start_of_word;
     int id, timestep;
-    T prob, parent_scr, lm_prob, score;
+    T prob, parent_scr, lm_prob, score, penalty;
+    std::string token;
     Node<T>* parent;
-    std::vector<std::string> n_tokens;
+    lm::ngram::State lm_state;
+    fst::StdVectorFst::StateId lexicon_state;
     std::vector<Node<T>*> childs;
 
-    Node(int id, int timestep, T prob, Node<T>* parent, int context_size, bool is_repeat_node)
-        : still_in_prefixes(true),
+    Node(int id, int timestep, T prob, T penalty, std::string token, Node<T>* parent)
+        : arc_exist(false),
           id(id),
           timestep(timestep),
           prob(prob),
+          penalty(penalty),
+          token(token),
           parent_scr(static_cast<T>(zctc::ZERO)),
           lm_prob(static_cast<T>(zctc::ZERO)),
           score(static_cast<T>(zctc::ZERO)),
           parent(parent)
     {
-        if (this->parent == nullptr) {
-            this->n_tokens.resize(context_size, "<s>");
-            return;
-        }
+        if (this->parent == nullptr) return;
 
         this->parent_scr = parent->score;
-        if (is_repeat_node) {
-            return;
-        } 
 
-        this->n_tokens.reserve(context_size);
-        std::copy_n(this->parent->n_tokens.begin() + 1, context_size, this->n_tokens.begin());
-        // this->n_tokens[context_size] = this->id_to_tok;
-
-        this->update_score();
     }
 
     ~Node() {
@@ -53,14 +48,13 @@ public:
     }
 
     inline void update_score() noexcept;
-    inline void start_token_check() noexcept;
 
-    Node<T>* add_to_child(int id, int timestep, T prob, int context_size);
+    Node<T>* add_to_child(int id, int timestep, T prob, std::string token, bool* is_repeat);
 
     // element-wise iterator for this class,
     typename std::vector<Node<T>*>::iterator begin() noexcept { return this->childs.begin(); }
-    typename std::vector<Node<T>*>::const_iterator cbegin() const noexcept { return this->childs.cbegin(); }
     typename std::vector<Node<T>*>::iterator end() noexcept { return this->childs.end(); }
+    typename std::vector<Node<T>*>::const_iterator cbegin() const noexcept { return this->childs.cbegin(); }
     typename std::vector<Node<T>*>::const_iterator cend() const noexcept { return this->childs.cend(); }
 };
 
@@ -73,31 +67,33 @@ public:
 template <typename T>
 void zctc::Node<T>::update_score() noexcept {
     this->score = this->parent_scr + this->prob + this->lm_prob;
+
+    if (!(this->arc_exist))
+        this->score += this->penalty;
 }
 
 template <typename T>
-void zctc::Node<T>::start_token_check() noexcept {
-    // ...;
-}
-
-template <typename T>
-zctc::Node<T>* zctc::Node<T>::add_to_child(int id, int timestep, T prob, int context_size) {
+zctc::Node<T>* zctc::Node<T>::add_to_child(int id, int timestep, T prob, std::string token, bool* is_repeat) {
 
     Node<T>* child;
 
     if (id == this->id) {
-        
-        child = new Node<T>(id, timestep, prob + this->prob, this->parent, context_size, true);
+
+        *is_repeat = true;
+        child = new Node<T>(id, timestep, prob + this->prob, this->penalty, token, this->parent);
         child->lm_prob = this->lm_prob;
+        child->arc_exist = this->arc_exist;
+        child->lm_state = this->lm_state;
+        child->lexicon_state = this->lexicon_state;
 
         child->update_score();
 
-        child->n_tokens = this->n_tokens;
         this->parent->childs.push_back(child);
 
     } else {
 
-        child = new Node<T>(id, timestep, prob, this, context_size, false);
+        *is_repeat = false;
+        child = new Node<T>(id, timestep, prob, this->penalty, token, this);
         this->childs.push_back(child);
 
     }

@@ -1,10 +1,9 @@
 .vscode
-zctc/bin/
-zctc/lib/
-zctc/include/
-zctc/
 __pycache__/
 *whl
 build/
 dist/
 *egg-info/
+*tar.gz
+*log
+*.so

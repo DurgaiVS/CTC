@@ -10,7 +10,7 @@ if(NOT DEFINED PYTHON_EXECUTABLE OR NOT DEFINED CMAKE_INSTALL_PREFIX OR NOT DEFI
     message(FATAL_ERROR "Please specify PYTHON_EXECUTABLE and CMAKE_INSTALL_PREFIX and PYTHON_INCLUDE_DIR and FST_DIR")
 endif()
 
-add_compile_options(-Wall -pedantic -fPIC)
+add_compile_options(-Wall -pedantic -fPIC -DKENLM_MAX_ORDER=6)
 
 include(FetchContent)
 
@@ -19,22 +19,24 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/kpu/kenlm.git
     GIT_TAG 716251e7 # or specify a specific tag or branch
 )
-FetchContent_MakeAvailable(kenlm_external)
-
 FetchContent_Declare(
     pybind11
     GIT_REPOSITORY https://github.com/pybind/pybind11.git
     GIT_TAG v2.10.4
 )
-FetchContent_MakeAvailable(pybind11)
+
+FetchContent_MakeAvailable(pybind11 kenlm_external)
 
 file(GLOB FST_SOURCES ${FST_DIR}/src/lib/*.cc ${FST_DIR}/src/script/*.cc)
+
 pybind11_add_module(_zctc SHARED ${CMAKE_SOURCE_DIR}/src/binding.cpp ${FST_SOURCES})
-include_directories(${CMAKE_SOURCE_DIR}/include ${pybind11_INCLUDE_DIR} ${PYTHON_INCLUDE_DIR} ${FST_DIR}/src/include ${kenlm_INCLUDE_DIR})
+include_directories(${CMAKE_SOURCE_DIR}/include ${pybind11_INCLUDE_DIR} ${PYTHON_INCLUDE_DIR} ${FST_DIR}/src/include ${FETCHCONTENT_BASE_DIR}/kenlm_external-src)
+
 link_libraries(_zctc ${PYTHON_LIBRARIES} kenlm_builder kenlm_interpolate kenlm_filter kenlm_util kenlm z bz2 lzma)
 install(TARGETS _zctc DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
 
-add_executable(zctc ${CMAKE_SOURCE_DIR}/src/main.cpp)
-install(TARGETS zctc DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
+# add_executable(zctc ${CMAKE_SOURCE_DIR}/src/main.cpp)
+# install(TARGETS zctc DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
+# zctc
 
-set_target_properties(_zctc zctc kenlm_filter kenlm_builder kenlm_util kenlm kenlm_interpolate PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+set_target_properties(_zctc kenlm_filter kenlm_builder kenlm_util kenlm kenlm_interpolate PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")

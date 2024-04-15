@@ -10,7 +10,7 @@ X="sudo apt install build-essential cmake libboost-system-dev libboost-thread-de
 PWD=$(pwd)
 cd "$(realpath "$(dirname "$0")")" || exit
 mkdir build
-WORKER=$(($(($(nproc) / 2)) > 15 ? 15 : $(($(nproc) / 2))))
+WORKER=$(($(($(nproc) / 2)) > 15 ? 15 : $(nproc)))
 
 if [ $# -eq 1 ]; then
     BUILD_TYPE="Debug"
@@ -18,13 +18,20 @@ else
     BUILD_TYPE=$1
 fi
 
+fst_v="openfst-1.8.3"
+fst_url="https://www.openfst.org/twiki/pub/FST/FstDownload/$fst_v.tar.gz"
+
+# wget $fst_url
+tar -xzf $fst_v.tar.gz
+
 cmake -B ./build -DPYTHON_EXECUTABLE:PATH="$(command -v python)" -DCMAKE_INSTALL_PREFIX:PATH="$(realpath ./zctc)" \
-    -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DPYTHON_INCLUDE_DIR:PATH="$(python -c "from sysconfig import get_paths; print(get_paths()['include'])")" .
+    -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DPYTHON_INCLUDE_DIR:PATH="$(python -c "from sysconfig import get_paths; print(get_paths()['include'])")" \
+    -DFST_DIR="$(realpath ./$fst_v)" .
 
 cd build || exit
 make "-j$WORKER" && make install
 
 cd .. || exit 0
-rm -rf ./build
+rm -rf ./build ./$fst_v
 
 cd $PWD

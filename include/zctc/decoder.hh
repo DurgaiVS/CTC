@@ -2,12 +2,15 @@
 #define _ZCTC_DECODER_H
 
 #include <algorithm>
+#include <string>
+#include <iostream>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/numpy.h>
 
 #include "./trie.hh"
+#include "./ext_scorer.hh"
 
 namespace py = pybind11;
 
@@ -18,20 +21,33 @@ public:
     template <typename T>
     static bool descending_compare(zctc::Node<T>* x, zctc::Node<T>* y);
 
-    const int thread_count, blank_id, cutoff_top_n, vocab_size;
-    const float nucleus_prob_per_timestep;
+    const char tok_sep;
+    const int thread_count, blank_id, cutoff_top_n;
+    const float nucleus_prob_per_timestep, penalty;
     const std::size_t beam_width;
 
-    int n_gram, n_context;
+    int vocab_size, apostrophe_id;
+    ExternalScorer ext_scorer;
+    std::vector<std::string> id_tok_map;
 
-    Decoder(int thread_count, int blank_id, int cutoff_top_n, int vocab_size, float nucleus_prob_per_timestep, std::size_t beam_width)
-        : thread_count(thread_count),
+    Decoder(int thread_count, int blank_id, int cutoff_top_n, float nucleus_prob_per_timestep, std::size_t beam_width, float penalty, char tok_sep, char* lm_path, char* lexicon_path, char* vocab_path)
+        : tok_sep(tok_sep),
+          thread_count(thread_count),
           blank_id(blank_id),
           cutoff_top_n(cutoff_top_n),
-          vocab_size(vocab_size),
           nucleus_prob_per_timestep(nucleus_prob_per_timestep),
-          beam_width(beam_width)
-    { }
+          penalty(penalty),
+          beam_width(beam_width),
+          ext_scorer(zctc::ExternalScorer::construct_class(lm_path, lexicon_path))
+    {
+        this->load_vocab(vocab_path);
+    }
+
+    inline std::string get_token_from_id(int id) const;
+    void load_vocab(char* vocab_path);
+
+    template <typename T>
+    inline void start_of_word_check(Node<T>* prefix) const;
 
     template <typename T>
     void decode(
@@ -82,6 +98,39 @@ bool zctc::Decoder::descending_compare(zctc::Node<T>* x, zctc::Node<T>* y) {
     return x->score > y->score;
 }
 
+std::string zctc::Decoder::get_token_from_id(int id) const {
+    return this->id_tok_map[id];
+}
+
+void zctc::Decoder::load_vocab(char* vocab_path) {
+
+    std::ifstream inputFile(vocab_path);
+
+    if (!inputFile.is_open())
+        std::runtime_error("Cannot open vocab file from the path provided.");
+
+    std::string line;
+    while (std::getline(inputFile, line)) {
+        this->id_tok_map.push_back(line);
+    }
+
+    this->vocab_size = this->id_tok_map.size();
+
+}
+
+template <typename T>
+void zctc::Decoder::start_of_word_check(Node<T>* prefix) const {
+    prefix->is_start_of_word = !(
+        prefix->id == this->apostrophe_id || 
+        prefix->parent->id == this->apostrophe_id ||
+        prefix->token.at(0) == this->tok_sep
+    );
+
+    if (prefix->is_start_of_word)
+        prefix->lexicon_state = this->ext_scorer.lexicon->Start();
+
+}
+
 template <typename T>
 void zctc::Decoder::decode(
     T* logits,
@@ -92,16 +141,21 @@ void zctc::Decoder::decode(
 ) const {
 
     T nucleus_max = static_cast<T>(this->nucleus_prob_per_timestep);
+
+    bool is_repeat;
+    int iter_val;
+    int *curr_id, *curr_l, *curr_t;
+    zctc::Node<T>* child;
     std::vector<zctc::Node<T>*> prefixes, tmp;
+    zctc::Node<T> root(zctc::ROOT_ID, -1, static_cast<T>(zctc::ZERO), static_cast<T>(this->penalty), "<s>", nullptr);
+    root.lexicon_state = this->ext_scorer.lexicon->Start();
+    this->ext_scorer.lm->NullContextWrite(&(root.lm_state));
+
     prefixes.reserve(this->beam_width);
     tmp.reserve(this->beam_width);
 
-    zctc::Node<T> root(zctc::ROOT_ID, -1, static_cast<T>(zctc::ZERO), nullptr, this->n_context, false);
     prefixes.push_back(&root);
 
-    zctc::Node<T>* child;
-    int *curr_id, *curr_l, *curr_t;
-    int iter_val;
 
     for (int t = 0; t < seq_len; t++) {
         T nucleus_count = 0;
@@ -116,8 +170,20 @@ void zctc::Decoder::decode(
 
             for (zctc::Node<T>* prefix : prefixes) {
 
-                child = prefix->add_to_child(index, t, prob, this->n_context); 
+                child = prefix->add_to_child(index, t, prob, this->get_token_from_id(index), &is_repeat);
                 tmp.push_back(child);
+
+                if (is_repeat) 
+                    continue;
+                else if (child->id == this->blank_id) {
+                    child->lm_state = child->parent->lm_state;
+                    child->lexicon_state = child->parent->lexicon_state;
+
+                    continue;
+                }
+
+                this->start_of_word_check(child);
+                this->ext_scorer.run_ext_scoring(child);
 
             }
 
@@ -135,7 +201,6 @@ void zctc::Decoder::decode(
 
         std::nth_element(tmp.begin(), tmp.begin() + this->beam_width, tmp.end(), Decoder::descending_compare<T>);
 
-        
         std::copy_n(tmp.begin(), this->beam_width, std::back_inserter(prefixes));
         tmp.clear();
 

@@ -7,4 +7,5 @@ int ROOT_ID = -1;
 float ZERO = 0.0;
 
 }
-#endif
+
+#endif // _ZCTC_CONSTANTS_H

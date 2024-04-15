@@ -6,6 +6,7 @@ V3:
     changing the prob to (at t value), and also we are adding child to it, which might
     be misleading, like, at t=5 node, we found repetition and updated "t" to 6, also
     another class is getting added to this node
+- add to consider only the timestep with max confidence
 
 V2:
 
