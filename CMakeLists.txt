@@ -34,8 +34,8 @@ include_directories(${CMAKE_SOURCE_DIR}/include ${pybind11_INCLUDE_DIR} ${PYTHON
 target_link_libraries(_zctc PUBLIC ${PYTHON_LIBRARIES} kenlm_filter kenlm_builder kenlm_util kenlm z bz2 lzma)
 install(TARGETS _zctc DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
 
-# add_executable(zctc ${CMAKE_SOURCE_DIR}/src/main.cpp)
-# install(TARGETS zctc DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
-# zctc
+add_executable(zctc ${CMAKE_SOURCE_DIR}/src/main.cpp ${FST_SOURCES})
+target_link_libraries(zctc PUBLIC ${PYTHON_LIBRARIES} kenlm_filter kenlm_builder kenlm_util kenlm z bz2 lzma)
+install(TARGETS zctc DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
 
-set_target_properties(_zctc kenlm_filter kenlm_builder kenlm_util kenlm PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+set_target_properties(_zctc zctc kenlm_filter kenlm_builder kenlm_util kenlm PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")

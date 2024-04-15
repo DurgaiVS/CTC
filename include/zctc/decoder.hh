@@ -148,8 +148,9 @@ void zctc::Decoder::decode(
     zctc::Node<T>* child;
     std::vector<zctc::Node<T>*> prefixes, tmp;
     zctc::Node<T> root(zctc::ROOT_ID, -1, static_cast<T>(zctc::ZERO), static_cast<T>(this->penalty), "<s>", nullptr);
+    fst::SortedMatcher<fst::StdVectorFst> matcher(this->ext_scorer.lexicon, fst::MATCH_INPUT);
     root.lexicon_state = this->ext_scorer.lexicon->Start();
-    this->ext_scorer.lm->NullContextWrite(&(root.lm_state));
+    root.lm_state = this->ext_scorer.lm->BeginSentenceState();
 
     prefixes.reserve(this->beam_width);
     tmp.reserve(this->beam_width);
@@ -183,7 +184,7 @@ void zctc::Decoder::decode(
                 }
 
                 this->start_of_word_check(child);
-                this->ext_scorer.run_ext_scoring(child);
+                this->ext_scorer.run_ext_scoring(child, &matcher);
 
             }
 

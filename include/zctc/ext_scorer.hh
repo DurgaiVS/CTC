@@ -15,17 +15,22 @@ public:
     static ExternalScorer construct_class(char* lm_path, char* lexicon_path);
 
     bool skip;
-    lm::base::Model* lm;
+    lm::ngram::QuantArrayTrieModel* lm;
     fst::StdVectorFst* lexicon;
 
-    ExternalScorer(bool skip, lm::base::Model* lm, fst::StdVectorFst* lexicon)
+    ExternalScorer(bool skip, lm::ngram::QuantArrayTrieModel* lm, fst::StdVectorFst* lexicon)
     : skip(skip),
       lm(lm),
       lexicon(lexicon)
     { }
 
+    ~ExternalScorer() {
+        delete this->lm;
+        delete this->lexicon;
+    }
+
     template <typename T>
-    void run_ext_scoring(zctc::Node<T>* prefix) const;
+    void run_ext_scoring(zctc::Node<T>* prefix, fst::SortedMatcher<fst::StdVectorFst>* matcher) const;
 
 };
 
@@ -36,11 +41,11 @@ public:
 
 zctc::ExternalScorer zctc::ExternalScorer::construct_class(char* lm_path, char* lexicon_path) {
     bool skip = false;
-    lm::base::Model* lm = nullptr;
+    lm::ngram::QuantArrayTrieModel* lm = nullptr;
     fst::StdVectorFst* lexicon = nullptr;
 
     if (lm_path)
-        lm = lm::ngram::LoadVirtual(lm_path);
+        lm = new lm::ngram::QuantArrayTrieModel(lm_path);
 
 
     if (lexicon_path)
@@ -55,7 +60,7 @@ zctc::ExternalScorer zctc::ExternalScorer::construct_class(char* lm_path, char* 
 
 
 template <typename T>
-void zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* prefix) const {
+void zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* prefix, fst::SortedMatcher<fst::StdVectorFst>* matcher) const {
     if (this->skip) return;
 
     if (this->lm) {
@@ -67,16 +72,20 @@ void zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* prefix) const {
 
     if (this->lexicon) {
 
-        for (fst::ArcIterator<fst::StdVectorFst> aiter(*(this->lexicon), prefix->parent->lexicon_state); !aiter.Done(); aiter.Next()) {
+        if (!(prefix->parent->arc_exist || prefix->is_start_of_word)) {
 
-            const fst::StdArc& arc = aiter.Value();
-            if (arc.ilabel == prefix->id) {
+            prefix->arc_exist = false;
 
+        } else {
+
+            fst::StdVectorFst::StateId state = prefix->is_start_of_word ? prefix->lexicon_state : prefix->parent->lexicon_state;
+            matcher->SetState(state);
+
+            if (matcher->Find(prefix->id)) {
+                prefix->lexicon_state = matcher->Value().nextstate;
                 prefix->arc_exist = true;
-                prefix->lexicon_state = arc.nextstate;
-                break;
-
             }
+
         }
 
     }
