@@ -3,7 +3,6 @@
 
 #include "fst/fstlib.h"
 #include "lm/model.hh"
-#include "lm/vocab.hh"
 
 #include "./trie.hh"
 
@@ -12,22 +11,66 @@ namespace zctc {
 class ExternalScorer {
 public:
 
-    static ExternalScorer construct_class(char* lm_path, char* lexicon_path);
-
     bool skip;
+    const char tok_sep;
+    int apostrophe_id;
     lm::ngram::QuantArrayTrieModel* lm;
-    fst::StdVectorFst* lexicon;
+    fst::StdVectorFst *lexicon, *hw_fst;
 
-    ExternalScorer(bool skip, lm::ngram::QuantArrayTrieModel* lm, fst::StdVectorFst* lexicon)
-    : skip(skip),
-      lm(lm),
-      lexicon(lexicon)
-    { }
+    ExternalScorer(char tok_sep, int apostrophe_id, char* lm_path, char* lexicon_path)
+    : skip(false),
+      tok_sep(tok_sep),
+      apostrophe_id(apostrophe_id),
+      lm(nullptr),
+      lexicon(nullptr),
+      hw_fst(nullptr) {
+
+        if (lm_path)
+            this->lm = new lm::ngram::QuantArrayTrieModel(lm_path);
+
+        if (lexicon_path)
+            this->lexicon = fst::StdVectorFst::Read(lexicon_path);
+
+        if (lm == nullptr && lexicon == nullptr)
+            this->skip = true;
+
+      }
+
+    ExternalScorer(char tok_sep, char* lm_path, char* lexicon_path)
+    : skip(false),
+      tok_sep(tok_sep),
+      apostrophe_id(-1),
+      lm(nullptr),
+      lexicon(nullptr),
+      hw_fst(nullptr) {
+
+        if (lm_path)
+            this->lm = new lm::ngram::QuantArrayTrieModel(lm_path);
+
+        if (lexicon_path)
+            this->lexicon = fst::StdVectorFst::Read(lexicon_path);
+
+        if (lm == nullptr && lexicon == nullptr)
+            this->skip = true;
+
+      }
 
     ~ExternalScorer() {
-        delete this->lm;
-        delete this->lexicon;
+        if (this->lm)
+            delete this->lm;
+
+        if (this->lexicon)
+            delete this->lexicon;
+
+        if (this->hw_fst)
+            delete this->hw_fst;
     }
+
+    template <typename T>
+    inline void start_of_word_check(Node<T>* prefix) const;
+
+    template <typename T>
+    inline void initialise_start_states(Node<T>* root) const;
 
     template <typename T>
     void run_ext_scoring(zctc::Node<T>* prefix, fst::SortedMatcher<fst::StdVectorFst>* matcher) const;
@@ -39,22 +82,27 @@ public:
 
 /* ---------------------------------------------------------------------------- */
 
-zctc::ExternalScorer zctc::ExternalScorer::construct_class(char* lm_path, char* lexicon_path) {
-    bool skip = false;
-    lm::ngram::QuantArrayTrieModel* lm = nullptr;
-    fst::StdVectorFst* lexicon = nullptr;
 
-    if (lm_path)
-        lm = new lm::ngram::QuantArrayTrieModel(lm_path);
+template <typename T>
+void zctc::ExternalScorer::start_of_word_check(Node<T>* prefix) const {
+    prefix->is_start_of_word = !(
+        prefix->id == this->apostrophe_id || 
+        prefix->parent->id == this->apostrophe_id ||
+        prefix->token.at(0) == this->tok_sep
+    );
 
+    if (prefix->is_start_of_word)
+        prefix->lexicon_state = this->lexicon->Start();
 
-    if (lexicon_path)
-        lexicon = fst::StdVectorFst::Read(lexicon_path);
+}
 
-    if (lm == nullptr && lexicon == nullptr)
-        skip = true;
+template <typename T>
+void zctc::ExternalScorer::initialise_start_states(Node<T>* root) const {
+    if (this->lexicon)
+        root->lexicon_state = this->lexicon->Start();
 
-    return zctc::ExternalScorer(skip, lm, lexicon);
+    if (this->lm)
+        root->lm_state = this->lm->BeginSentenceState();
 
 }
 
@@ -72,6 +120,8 @@ void zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* prefix, fst::SortedMat
 
     if (this->lexicon) {
 
+        this->start_of_word_check(prefix);
+
         if (!(prefix->parent->arc_exist || prefix->is_start_of_word)) {
 
             prefix->arc_exist = false;
@@ -88,6 +138,10 @@ void zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* prefix, fst::SortedMat
 
         }
 
+    }
+
+    if (this->hw_fst) {
+        
     }
 
     prefix->update_score();

@@ -6,10 +6,10 @@ import sys
 import subprocess
 import tarfile
 
-from tempfile import TemporaryDirectory
 from io import BytesIO
 from pathlib import Path
 from sysconfig import get_paths
+from tempfile import TemporaryDirectory
 from setuptools import setup, Extension, find_packages
 from setuptools.command.build_ext import build_ext
 
