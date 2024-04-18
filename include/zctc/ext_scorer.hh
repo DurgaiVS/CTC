@@ -14,7 +14,7 @@ public:
     bool skip;
     const char tok_sep;
     int apostrophe_id;
-    lm::ngram::QuantArrayTrieModel* lm;
+    lm::base::Model* lm;
     fst::StdVectorFst *lexicon, *hw_fst;
 
     ExternalScorer(char tok_sep, int apostrophe_id, char* lm_path, char* lexicon_path)
@@ -26,7 +26,7 @@ public:
       hw_fst(nullptr) {
 
         if (lm_path)
-            this->lm = new lm::ngram::QuantArrayTrieModel(lm_path);
+            this->lm = lm::ngram::LoadVirtual(lm_path);
 
         if (lexicon_path)
             this->lexicon = fst::StdVectorFst::Read(lexicon_path);
@@ -45,7 +45,7 @@ public:
       hw_fst(nullptr) {
 
         if (lm_path)
-            this->lm = new lm::ngram::QuantArrayTrieModel(lm_path);
+            this->lm = lm::ngram::LoadVirtual(lm_path);
 
         if (lexicon_path)
             this->lexicon = fst::StdVectorFst::Read(lexicon_path);
@@ -102,7 +102,7 @@ void zctc::ExternalScorer::initialise_start_states(Node<T>* root) const {
         root->lexicon_state = this->lexicon->Start();
 
     if (this->lm)
-        root->lm_state = this->lm->BeginSentenceState();
+        this->lm->NullContextWrite(&(root->lm_state));
 
 }
 

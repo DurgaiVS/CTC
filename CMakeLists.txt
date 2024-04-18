@@ -28,6 +28,10 @@ FetchContent_MakeAvailable(pybind11 kenlm_external)
 
 file(GLOB FST_SOURCES ${FST_DIR}/src/lib/*.cc ${FST_DIR}/src/script/*.cc)
 
+if(${CMAKE_BUILD_TOOL} STREQUAL Debug)
+    add_compile_options(-fsanitize=leak -fsanitize=undefinied -fsanitize=address)
+endif()
+
 pybind11_add_module(_zctc SHARED ${CMAKE_SOURCE_DIR}/src/binding.cpp ${FST_SOURCES})
 include_directories(${CMAKE_SOURCE_DIR}/include ${pybind11_INCLUDE_DIR} ${PYTHON_INCLUDE_DIR} ${FST_DIR}/src/include ${FETCHCONTENT_BASE_DIR}/kenlm_external-src)
 
