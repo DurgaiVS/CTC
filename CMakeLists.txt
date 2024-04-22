@@ -17,14 +17,20 @@ include(FetchContent)
 FetchContent_Declare(
     kenlm_external
     GIT_REPOSITORY https://github.com/kpu/kenlm.git
+    GIT_TAG e504a4d61c413873e7d5f13d8ac4890bd4dae36c
 )
 FetchContent_Declare(
     pybind11
     GIT_REPOSITORY https://github.com/pybind/pybind11.git
     GIT_TAG v2.10.4
 )
+FetchContent_Declare(
+    threadpool_external
+    GIT_REPOSITORY https://github.com/progschj/ThreadPool.git
+    GIT_TAG 9a42ec1329f259a5f4881a291db1dcb8f2ad9040
+)
 
-FetchContent_MakeAvailable(pybind11 kenlm_external)
+FetchContent_MakeAvailable(pybind11 kenlm_external threadpool_external)
 
 file(GLOB FST_SOURCES ${FST_DIR}/src/lib/*.cc ${FST_DIR}/src/script/*.cc)
 
@@ -33,7 +39,7 @@ if(${CMAKE_BUILD_TOOL} STREQUAL Debug)
 endif()
 
 pybind11_add_module(_zctc SHARED ${CMAKE_SOURCE_DIR}/src/binding.cpp ${FST_SOURCES})
-include_directories(${CMAKE_SOURCE_DIR}/include ${pybind11_INCLUDE_DIR} ${PYTHON_INCLUDE_DIR} ${FST_DIR}/src/include ${FETCHCONTENT_BASE_DIR}/kenlm_external-src)
+include_directories(${CMAKE_SOURCE_DIR}/include ${pybind11_INCLUDE_DIR} ${PYTHON_INCLUDE_DIR} ${FST_DIR}/src/include ${FETCHCONTENT_BASE_DIR}/kenlm_external-src ${FETCHCONTENT_BASE_DIR}/threadpool_external-src)
 
 target_link_libraries(_zctc PUBLIC ${PYTHON_LIBRARIES} kenlm_filter kenlm_builder kenlm_util kenlm z bz2 lzma pthread dl util)
 install(TARGETS _zctc DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)

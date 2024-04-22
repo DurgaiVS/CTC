@@ -8,6 +8,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/numpy.h>
+#include <ThreadPool.h>
 
 #include "./trie.hh"
 #include "./ext_scorer.hh"
@@ -45,7 +46,7 @@ public:
     void load_vocab(char* vocab_path);
 
     template <typename T>
-    void decode(
+    int decode(
         T* log_logits,
         int* sorted_ids,
         int* labels,
@@ -73,11 +74,23 @@ public:
         int *ids = (int*)ids_buf.ptr, *labels = (int*)labels_buf.ptr, *timesteps = (int*)timesteps_buf.ptr;
         T* logits = (T*)logits_buf.ptr;
 
+        ThreadPool pool(this->thread_count);
+        std::vector< std::future<int> > results(batch_size);
+
         for (int i = 0, ip_pos = 0, op_pos = 0; i < batch_size; i++) {
             ip_pos = i * seq_len * this->vocab_size;
             op_pos = i * this->beam_width * seq_len;
-            this->decode(logits + ip_pos, ids + ip_pos, labels + op_pos, timesteps + op_pos, seq_len);
+
+            results.emplace_back(
+                pool.enqueue( 
+                    this->decode, logits + ip_pos, ids + ip_pos, labels + op_pos, timesteps + op_pos, seq_len
+                )
+            );
         }
+
+        for (auto&& result : results)
+            if (result.get() != 0)
+                throw std::runtime_error("Unexpected error occured during execution");
 
     }
 
@@ -117,7 +130,7 @@ void zctc::Decoder::load_vocab(char* vocab_path) {
 }
 
 template <typename T>
-void zctc::Decoder::decode(
+int zctc::Decoder::decode(
     T* logits,
     int* ids,
     int* label,
@@ -210,6 +223,8 @@ void zctc::Decoder::decode(
 
         iter_val++;
     }
+
+    return 0;
 
 }
 
