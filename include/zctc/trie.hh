@@ -17,7 +17,7 @@ public:
 
     bool arc_exist, is_start_of_word;
     int id, timestep;
-    T prob, parent_scr, lm_prob, score, penalty;
+    T prob, parent_scr, lm_prob, score, penalty, max_prob;
     std::string token;
     Node<T>* parent;
     lm::ngram::State lm_state;
@@ -30,6 +30,26 @@ public:
           timestep(timestep),
           prob(prob),
           penalty(penalty),
+          max_prob(prob),
+          token(token),
+          parent_scr(static_cast<T>(zctc::ZERO)),
+          lm_prob(static_cast<T>(zctc::ZERO)),
+          score(static_cast<T>(zctc::ZERO)),
+          parent(parent)
+    {
+        if (this->parent == nullptr) return;
+
+        this->parent_scr = parent->score;
+
+    }
+
+    Node(int id, int timestep, T prob, T penalty, T max_prob, std::string token, Node<T>* parent)
+        : arc_exist(false),
+          id(id),
+          timestep(timestep),
+          prob(prob),
+          penalty(penalty),
+          max_prob(max_prob),
           token(token),
           parent_scr(static_cast<T>(zctc::ZERO)),
           lm_prob(static_cast<T>(zctc::ZERO)),
@@ -79,8 +99,17 @@ zctc::Node<T>* zctc::Node<T>::add_to_child(int id, int timestep, T prob, std::st
 
     if (id == this->id) {
 
+        T max_prob;
+        if (prob > this->max_prob) {
+            timestep = timestep;
+            max_prob = prob;
+        } else {
+            timestep = this->timestep;
+            max_prob = this->max_prob;
+        }
+
         *is_repeat = true;
-        child = new Node<T>(id, timestep, prob + this->prob, this->penalty, token, this->parent);
+        child = new Node<T>(id, timestep, prob + this->prob, this->penalty, max_prob, token, this->parent);
         child->lm_prob = this->lm_prob;
         child->arc_exist = this->arc_exist;
         child->lm_state = this->lm_state;

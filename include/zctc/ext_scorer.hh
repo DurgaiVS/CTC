@@ -13,14 +13,16 @@ public:
 
     bool skip;
     const char tok_sep;
-    int apostrophe_id;
+    const int apostrophe_id;
+    const float lm_alpha;
     lm::base::Model* lm;
     fst::StdVectorFst *lexicon, *hw_fst;
 
-    ExternalScorer(char tok_sep, int apostrophe_id, char* lm_path, char* lexicon_path)
+    ExternalScorer(char tok_sep, int apostrophe_id, float lm_alpha, char* lm_path, char* lexicon_path)
     : skip(false),
       tok_sep(tok_sep),
       apostrophe_id(apostrophe_id),
+      lm_alpha(lm_alpha),
       lm(nullptr),
       lexicon(nullptr),
       hw_fst(nullptr) {
@@ -33,26 +35,6 @@ public:
 
         if (lm == nullptr && lexicon == nullptr)
             this->skip = true;
-
-      }
-
-    ExternalScorer(char tok_sep, char* lm_path, char* lexicon_path)
-    : skip(false),
-      tok_sep(tok_sep),
-      apostrophe_id(-1),
-      lm(nullptr),
-      lexicon(nullptr),
-      hw_fst(nullptr) {
-
-        if (lm_path)
-            this->lm = lm::ngram::LoadVirtual(lm_path);
-
-        if (lexicon_path)
-            this->lexicon = fst::StdVectorFst::Read(lexicon_path);
-
-        if (lm == nullptr && lexicon == nullptr)
-            this->skip = true;
-
       }
 
     ~ExternalScorer() {

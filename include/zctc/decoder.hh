@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <string>
-#include <iostream>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -22,31 +21,28 @@ public:
     template <typename T>
     static bool descending_compare(zctc::Node<T>* x, zctc::Node<T>* y);
 
-    const int thread_count, blank_id, cutoff_top_n;
+    const int thread_count, blank_id, cutoff_top_n, vocab_size;
     const float nucleus_prob_per_timestep, penalty;
     const std::size_t beam_width;
+    const std::vector<std::string> vocab;
+    const ExternalScorer ext_scorer;
 
-    int vocab_size;
-    ExternalScorer ext_scorer;
-    std::vector<std::string> id_tok_map;
-
-    Decoder(int thread_count, int blank_id, int cutoff_top_n, float nucleus_prob_per_timestep, std::size_t beam_width, float penalty, char tok_sep, char* lm_path, char* lexicon_path, char* vocab_path)
+    Decoder(int thread_count, int blank_id, int cutoff_top_n, int apostrophe_id, float nucleus_prob_per_timestep, float lm_alpha, std::size_t beam_width, float penalty, char tok_sep, std::vector<std::string> vocab, char* lm_path, char* lexicon_path)
         : thread_count(thread_count),
           blank_id(blank_id),
           cutoff_top_n(cutoff_top_n),
+          vocab_size(vocab_size),
           nucleus_prob_per_timestep(nucleus_prob_per_timestep),
           penalty(penalty),
           beam_width(beam_width),
-          ext_scorer(tok_sep, lm_path, lexicon_path)
-    {
-        this->load_vocab(vocab_path);
-    }
+          vocab(vocab),
+          ext_scorer(tok_sep, apostrophe_id, lm_alpha, lm_path, lexicon_path)
+    { }
 
     inline std::string get_token_from_id(int id) const;
-    void load_vocab(char* vocab_path);
 
     template <typename T>
-    int decode(
+    void decode(
         T* log_logits,
         int* sorted_ids,
         int* labels,
@@ -63,6 +59,7 @@ public:
         const int batch_size,
         const int seq_len
     ) const {
+
         py::buffer_info logits_buf = batch_log_logits.request();
         py::buffer_info ids_buf = batch_sorted_ids.request();
         py::buffer_info labels_buf = batch_labels.request();
@@ -75,16 +72,17 @@ public:
         T* logits = (T*)logits_buf.ptr;
 
         ThreadPool pool(this->thread_count);
-        std::vector< std::future<int> > results(batch_size);
+        std::vector<std::future<int>> results;
 
         for (int i = 0, ip_pos = 0, op_pos = 0; i < batch_size; i++) {
             ip_pos = i * seq_len * this->vocab_size;
             op_pos = i * this->beam_width * seq_len;
 
             results.emplace_back(
-                pool.enqueue( 
-                    this->decode, logits + ip_pos, ids + ip_pos, labels + op_pos, timesteps + op_pos, seq_len
-                )
+                pool.enqueue([&]() {
+                    this->decode(logits + ip_pos, ids + ip_pos, labels + op_pos, timesteps + op_pos, seq_len);
+                    return 0;
+                })
             );
         }
 
@@ -107,30 +105,11 @@ bool zctc::Decoder::descending_compare(zctc::Node<T>* x, zctc::Node<T>* y) {
 }
 
 std::string zctc::Decoder::get_token_from_id(int id) const {
-    return this->id_tok_map[id];
-}
-
-void zctc::Decoder::load_vocab(char* vocab_path) {
-
-    std::ifstream inputFile(vocab_path);
-
-    if (!inputFile.is_open())
-        std::runtime_error("Cannot open vocab file from the path provided.");
-
-    std::string line;
-    while (std::getline(inputFile, line)) {
-        this->id_tok_map.push_back(line);
-
-        if (line == "'")
-            this->ext_scorer.apostrophe_id = this->id_tok_map.size() - 1;
-    }
-
-    this->vocab_size = this->id_tok_map.size();
-
+    return this->vocab[id];
 }
 
 template <typename T>
-int zctc::Decoder::decode(
+void zctc::Decoder::decode(
     T* logits,
     int* ids,
     int* label,
@@ -223,8 +202,6 @@ int zctc::Decoder::decode(
 
         iter_val++;
     }
-
-    return 0;
 
 }
 
