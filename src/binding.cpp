@@ -4,11 +4,11 @@
 PYBIND11_MODULE(_zctc, m) {
      py::class_<zctc::Decoder>(m, "Decoder")
        .def(py::init<int, int, int, int, float, float, py::ssize_t, float, char, std::vector<std::string>, char*, char*>(),
-           py::arg("thread_count") = 0, py::arg("blank_id") = 0, 
-           py::arg("cutoff_top_n") = 0, py::arg("apostrophe_id") = 0,
-           py::arg("nucleus_prob_per_timestep") = 0.0, py::arg("lm_alpha") = 0.0, 
-           py::arg("beam_width") = 0, py::arg("penalty") = 0.0, 
-           py::arg("tok_sep") = '\0', py::arg("vocab") = std::vector<std::string>(),
+           py::arg("thread_count"), py::arg("blank_id"), 
+           py::arg("cutoff_top_n"), py::arg("apostrophe_id"),
+           py::arg("nucleus_prob_per_timestep"), py::arg("lm_alpha"), 
+           py::arg("beam_width"), py::arg("penalty"), 
+           py::arg("tok_sep"), py::arg("vocab"),
            py::arg("lm_path") = nullptr, py::arg("lexicon_path") = nullptr)
        .def("batch_decode", &zctc::Decoder::batch_decode<float>,
             py::call_guard<py::gil_scoped_release>())
