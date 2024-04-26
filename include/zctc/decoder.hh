@@ -56,19 +56,32 @@ public:
         py::array_t<int>& batch_sorted_ids,
         py::array_t<int>& batch_labels,
         py::array_t<int>& batch_timesteps,
-        const int batch_size,
-        const int seq_len
+        py::array_t<int>& batch_seq_lens,
+        const int batch_size
     ) const {
 
         py::buffer_info logits_buf = batch_log_logits.request();
         py::buffer_info ids_buf = batch_sorted_ids.request();
         py::buffer_info labels_buf = batch_labels.request();
         py::buffer_info timesteps_buf = batch_timesteps.request();
+        py::buffer_info seqlen_buf = batch_seq_lens.request();
 
-        if (logits_buf.ndim != 3 || ids_buf.ndim != 3 || labels_buf.ndim != 3 || timesteps_buf.ndim != 3)
-            throw std::runtime_error("Number of dimensions must be three");
+        if (
+            logits_buf.ndim != 3 || 
+            ids_buf.ndim != 3 || 
+            labels_buf.ndim != 3 || 
+            timesteps_buf.ndim != 3 || 
+            seqlen_buf.ndim != 2
+        )
+            throw std::runtime_error(
+                "Logits must be three dimensional, like B x S x T, 
+                and Sequence Length must be two dimensional, like B x len"
+            );
 
-        int *ids = (int*)ids_buf.ptr, *labels = (int*)labels_buf.ptr, *timesteps = (int*)timesteps_buf.ptr;
+        int* ids = (int*)ids_buf.ptr;
+        int* labels = (int*)labels_buf.ptr;
+        int* timesteps = (int*)timesteps_buf.ptr;
+        int* seq_lens = (int*)seqlen_buf.ptr;
         T* logits = (T*)logits_buf.ptr;
 
         ThreadPool pool(this->thread_count);
@@ -80,10 +93,12 @@ public:
 
             results.emplace_back(
                 pool.enqueue([&]() {
-                    this->decode(logits + ip_pos, ids + ip_pos, labels + op_pos, timesteps + op_pos, seq_len);
+                    this->decode(logits + ip_pos, ids + ip_pos, labels + op_pos, timesteps + op_pos, *seq_lens);
                     return 0;
                 })
             );
+
+            seq_lens++;
         }
 
         for (auto&& result : results)

@@ -2,7 +2,7 @@
 
 
 PYBIND11_MODULE(_zctc, m) {
-     py::class_<zctc::Decoder>(m, "Decoder")
+     py::class_<zctc::Decoder>(m, "_Decoder")
        .def(py::init<int, int, int, int, float, float, py::ssize_t, float, char, std::vector<std::string>, char*, char*>(),
            py::arg("thread_count"), py::arg("blank_id"), 
            py::arg("cutoff_top_n"), py::arg("apostrophe_id"),

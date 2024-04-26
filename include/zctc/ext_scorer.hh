@@ -96,7 +96,7 @@ void zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* prefix, fst::SortedMat
     if (this->lm) {
 
         lm::WordIndex word_id = this->lm->BaseVocabulary().Index(prefix->token);
-        prefix->lm_prob = this->lm->BaseScore(&(prefix->parent->lm_state), word_id, &(prefix->lm_state));
+        prefix->lm_prob = this->lm_alpha + this->lm->BaseScore(&(prefix->parent->lm_state), word_id, &(prefix->lm_state));
 
     }
 
