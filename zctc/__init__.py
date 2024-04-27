@@ -65,7 +65,7 @@ class ZBeamDecoder(_Decoder):
         labels = numpy.zeros((batch_size, self.beam_width, seq_len), dtype=numpy.int32)
         timesteps = numpy.zeros((batch_size, self.beam_width, seq_len), dtype=numpy.int32)
 
-        self.batch_decode(logits.numpy(), sorted_indices.numpy(), labels, timesteps, seq_lens.numpy(), batch_size)
+        self.batch_decode(logits.numpy(), sorted_indices.numpy(), labels, timesteps, seq_lens.numpy(), batch_size, seq_len)
 
         mask = labels > 0
         return labels[mask], timesteps[mask]

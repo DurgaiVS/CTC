@@ -56,49 +56,48 @@ public:
         py::array_t<int>& batch_sorted_ids,
         py::array_t<int>& batch_labels,
         py::array_t<int>& batch_timesteps,
-        py::array_t<int>& batch_seq_lens,
-        const int batch_size
+        py::array_t<int>& batch_seq_len,
+        const int batch_size,
+        const int max_seq_len
     ) const {
 
         py::buffer_info logits_buf = batch_log_logits.request();
         py::buffer_info ids_buf = batch_sorted_ids.request();
         py::buffer_info labels_buf = batch_labels.request();
         py::buffer_info timesteps_buf = batch_timesteps.request();
-        py::buffer_info seqlen_buf = batch_seq_lens.request();
+        py::buffer_info seq_len_buf = batch_seq_len.request();
 
         if (
             logits_buf.ndim != 3 || 
             ids_buf.ndim != 3 || 
             labels_buf.ndim != 3 || 
             timesteps_buf.ndim != 3 || 
-            seqlen_buf.ndim != 2
+            seq_len_buf.ndim != 2
         )
             throw std::runtime_error(
-                "Logits must be three dimensional, like B x S x T, 
-                and Sequence Length must be two dimensional, like B x len"
+                "Logits must be three dimensional, like B x S x T, "
+                "and Sequence Length must be two dimensional, like B x len"
             );
 
         int* ids = (int*)ids_buf.ptr;
         int* labels = (int*)labels_buf.ptr;
         int* timesteps = (int*)timesteps_buf.ptr;
-        int* seq_lens = (int*)seqlen_buf.ptr;
+        int* seq_len = (int*)seq_len_buf.ptr;
         T* logits = (T*)logits_buf.ptr;
 
         ThreadPool pool(this->thread_count);
         std::vector<std::future<int>> results;
 
         for (int i = 0, ip_pos = 0, op_pos = 0; i < batch_size; i++) {
-            ip_pos = i * seq_len * this->vocab_size;
-            op_pos = i * this->beam_width * seq_len;
+            ip_pos = i * max_seq_len * this->vocab_size;
+            op_pos = i * this->beam_width * max_seq_len;
 
             results.emplace_back(
                 pool.enqueue([&]() {
-                    this->decode(logits + ip_pos, ids + ip_pos, labels + op_pos, timesteps + op_pos, *seq_lens);
+                    this->decode(logits + ip_pos, ids + ip_pos, labels + op_pos, timesteps + op_pos, *(seq_len + i));
                     return 0;
                 })
             );
-
-            seq_lens++;
         }
 
         for (auto&& result : results)
