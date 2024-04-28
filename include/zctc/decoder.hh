@@ -31,7 +31,7 @@ public:
         : thread_count(thread_count),
           blank_id(blank_id),
           cutoff_top_n(cutoff_top_n),
-          vocab_size(vocab_size),
+          vocab_size(vocab.size()),
           nucleus_prob_per_timestep(nucleus_prob_per_timestep),
           penalty(penalty),
           beam_width(beam_width),
