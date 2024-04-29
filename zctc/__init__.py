@@ -1,14 +1,9 @@
 __all__ = ["_Decoder", "ZBeamDecoder"]
 
-import os
-import gzip
-import shutil
 import torch
 import numpy
 import math
-from omegaconf import DictConfig
 from typing import Optional
-from tempfile import TemporaryDirectory
 
 from .lib._zctc import _Decoder
 
@@ -69,22 +64,3 @@ class ZBeamDecoder(_Decoder):
 
         mask = labels > 0
         return labels[mask], timesteps[mask]
-
-
-    @classmethod
-    def from_cfg(cls, config: DictConfig):
-
-        with TemporaryDirectory() as tmpdir:
-
-            if config.get("lm_path"):
-                lm_path: str = config["lm_path"]
-
-                if lm_path[-3:] == ".gz":
-                    with gzip.open(lm_path) as f_ip:
-                        new_path = os.path.join(tmpdir.name, "kenlm")
-                        with open(new_path, "wb") as f_op:
-                            shutil.copyfileobj(f_ip, f_op)
-
-                        config["lm_path"] = new_path
-
-            return cls(**config)

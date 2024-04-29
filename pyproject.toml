@@ -1,17 +1,18 @@
 [tool.poetry]
 name = "zctc"
 version = "0.1.0"
-description = "CLI tool to build, parse or generate new fst files from the tokenized vocab"
-authors = ["durgaivelselvan.mn <durgaivelselvan.mn@zohocorp.com>"]
+description = "Beam search CTC decoder repo"
+authors = ["DurgaiVS <durgaivel0309@gmail.com>"]
 readme = "README.md"
 build = "build.py"
 
 [tool.poetry.dependencies]
 python = ">=3.9,<3.12"
 torch = ">=2.1"
+numpy = "*"
 
 [tool.poetry.dev-dependencies]
 
 [build-system]
 build-backend = "poetry.core.masonry.api"
-requires = ["setuptools", "wheel", "poetry-core>=1.0.0"]
+requires = ["setuptools", "wheel", "requests", "poetry-core>=1.0.0"]
