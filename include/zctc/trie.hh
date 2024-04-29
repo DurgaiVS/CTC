@@ -2,6 +2,7 @@
 #define _ZCTC_TRIE_H
 
 #include <algorithm>
+#include <string>
 #include <vector>
 
 #include "fst/fstlib.h"

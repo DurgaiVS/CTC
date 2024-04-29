@@ -11,7 +11,6 @@ namespace zctc {
 class ExternalScorer {
 public:
 
-    bool skip;
     const char tok_sep;
     const int apostrophe_id;
     const float lm_alpha;
@@ -19,8 +18,7 @@ public:
     fst::StdVectorFst *lexicon, *hw_fst;
 
     ExternalScorer(char tok_sep, int apostrophe_id, float lm_alpha, char* lm_path, char* lexicon_path)
-    : skip(false),
-      tok_sep(tok_sep),
+    : tok_sep(tok_sep),
       apostrophe_id(apostrophe_id),
       lm_alpha(lm_alpha),
       lm(nullptr),
@@ -33,8 +31,6 @@ public:
         if (lexicon_path)
             this->lexicon = fst::StdVectorFst::Read(lexicon_path);
 
-        if (lm == nullptr && lexicon == nullptr)
-            this->skip = true;
       }
 
     ~ExternalScorer() {
@@ -91,7 +87,6 @@ void zctc::ExternalScorer::initialise_start_states(Node<T>* root) const {
 
 template <typename T>
 void zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* prefix, fst::SortedMatcher<fst::StdVectorFst>* matcher) const {
-    if (this->skip) return;
 
     if (this->lm) {
 
@@ -120,6 +115,8 @@ void zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* prefix, fst::SortedMat
 
         }
 
+    } else {
+        prefix->arc_exist = true;
     }
 
     if (this->hw_fst) {

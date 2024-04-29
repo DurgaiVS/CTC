@@ -1,9 +1,6 @@
 #ifndef _ZCTC_DECODER_H
 #define _ZCTC_DECODER_H
 
-#include <algorithm>
-#include <string>
-
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/numpy.h>
