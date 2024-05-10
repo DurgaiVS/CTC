@@ -51,7 +51,7 @@ class CMakeBuild(build_ext):
         # example of cmake args
         config = "Debug" if self.debug else "Release"
         cmake_args = [
-            "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=" + src_dir,
+            "-DLIBRARY_OUTPUT_DIRECTORY=" + src_dir,
             "-DCMAKE_BUILD_TYPE=" + config,
             "-DPYTHON_INCLUDE_DIR=" + str(get_paths()["include"]),
             "-DPYTHON_EXECUTABLE=" + str(sys.executable),
