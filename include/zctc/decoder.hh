@@ -39,15 +39,6 @@ public:
     inline std::string get_token_from_id(int id) const;
 
     template <typename T>
-    void decode(
-        T* log_logits,
-        int* sorted_ids,
-        int* labels,
-        int* timesteps,
-        const int seq_len
-    ) const;
-
-    template <typename T>
     void batch_decode(
         py::array_t<T>& batch_log_logits,
         py::array_t<int>& batch_sorted_ids,
@@ -56,101 +47,44 @@ public:
         py::array_t<int>& batch_seq_len,
         const int batch_size,
         const int max_seq_len
-    ) const {
-
-        py::buffer_info logits_buf = batch_log_logits.request();
-        py::buffer_info ids_buf = batch_sorted_ids.request();
-        py::buffer_info labels_buf = batch_labels.request();
-        py::buffer_info timesteps_buf = batch_timesteps.request();
-        py::buffer_info seq_len_buf = batch_seq_len.request();
-
-        if (
-            logits_buf.ndim != 3 || 
-            ids_buf.ndim != 3 || 
-            labels_buf.ndim != 3 || 
-            timesteps_buf.ndim != 3 || 
-            seq_len_buf.ndim != 2
-        )
-            throw std::runtime_error(
-                "Logits must be three dimensional, like B x S x T, "
-                "and Sequence Length must be two dimensional, like B x len"
-            );
-
-        int* ids = (int*)ids_buf.ptr;
-        int* labels = (int*)labels_buf.ptr;
-        int* timesteps = (int*)timesteps_buf.ptr;
-        int* seq_len = (int*)seq_len_buf.ptr;
-        T* logits = (T*)logits_buf.ptr;
-
-        ThreadPool pool(this->thread_count);
-        std::vector<std::future<int>> results;
-
-        for (int i = 0, ip_pos = 0, op_pos = 0; i < batch_size; i++) {
-            ip_pos = i * max_seq_len * this->vocab_size;
-            op_pos = i * this->beam_width * max_seq_len;
-
-            results.emplace_back(
-                pool.enqueue([&]() {
-                    this->decode(logits + ip_pos, ids + ip_pos, labels + op_pos, timesteps + op_pos, *(seq_len + i));
-                    return 0;
-                })
-            );
-        }
-
-        for (auto&& result : results)
-            if (result.get() != 0)
-                throw std::runtime_error("Unexpected error occured during execution");
-
-    }
+    ) const;
 
 };
 
-} // namespace zctc
-
-/* ---------------------------------------------------------------------------- */
-
 
 template <typename T>
-bool zctc::Decoder::descending_compare(zctc::Node<T>* x, zctc::Node<T>* y) {
-    return x->score > y->score;
-}
-
-std::string zctc::Decoder::get_token_from_id(int id) const {
-    return this->vocab[id];
-}
-
-template <typename T>
-void zctc::Decoder::decode(
+int decode(
+    const Decoder* decoder,
     T* logits,
     int* ids,
     int* label,
     int* timestep,
     const int seq_len
-) const {
+) {
 
-    T nucleus_max = static_cast<T>(this->nucleus_prob_per_timestep);
+    T nucleus_max = static_cast<T>(decoder->nucleus_prob_per_timestep);
 
     bool is_repeat;
     int iter_val;
     int *curr_id, *curr_l, *curr_t;
     zctc::Node<T>* child;
     std::vector<zctc::Node<T>*> prefixes, tmp;
-    zctc::Node<T> root(zctc::ROOT_ID, -1, static_cast<T>(zctc::ZERO), static_cast<T>(this->penalty), "<s>", nullptr);
-    fst::SortedMatcher<fst::StdVectorFst> matcher(this->ext_scorer.lexicon, fst::MATCH_INPUT);
+    zctc::Node<T> root(zctc::ROOT_ID, -1, static_cast<T>(zctc::ZERO), static_cast<T>(decoder->penalty), "<s>", nullptr);
+    fst::SortedMatcher<fst::StdVectorFst> matcher(decoder->ext_scorer.lexicon, fst::MATCH_INPUT);
 
-    this->ext_scorer.initialise_start_states(&root);
-    prefixes.reserve(this->beam_width);
-    tmp.reserve(this->beam_width);
+    decoder->ext_scorer.initialise_start_states(&root);
+    prefixes.reserve(decoder->beam_width);
+    tmp.reserve(decoder->beam_width);
 
     prefixes.push_back(&root);
 
 
     for (int t = 0; t < seq_len; t++) {
         T nucleus_count = 0;
-        iter_val = t * this->vocab_size;
+        iter_val = t * decoder->vocab_size;
         curr_id = ids + iter_val;
 
-        for (int i = 0; i < this->cutoff_top_n; i++, curr_id++) {
+        for (int i = 0; i < decoder->cutoff_top_n; i++, curr_id++) {
             int index = *curr_id;
             T prob = logits[iter_val + index];
 
@@ -158,19 +92,19 @@ void zctc::Decoder::decode(
 
             for (zctc::Node<T>* prefix : prefixes) {
 
-                child = prefix->add_to_child(index, t, prob, this->get_token_from_id(index), &is_repeat);
+                child = prefix->add_to_child(index, t, prob, decoder->get_token_from_id(index), &is_repeat);
                 tmp.push_back(child);
 
-                if (is_repeat) 
+                if (is_repeat)
                     continue;
-                else if (child->id == this->blank_id) {
+                else if (child->id == decoder->blank_id) {
                     child->lm_state = child->parent->lm_state;
                     child->lexicon_state = child->parent->lexicon_state;
 
                     continue;
                 }
 
-                this->ext_scorer.run_ext_scoring(child, &matcher);
+                decoder->ext_scorer.run_ext_scoring(child, &matcher);
 
             }
 
@@ -179,16 +113,16 @@ void zctc::Decoder::decode(
 
         prefixes.clear();
 
-        if (tmp.size() < this->beam_width) {
+        if (tmp.size() < decoder->beam_width) {
             std::copy(tmp.begin(), tmp.end(), std::back_inserter(prefixes));
 
             tmp.clear();
             continue;
         }
 
-        std::nth_element(tmp.begin(), tmp.begin() + this->beam_width, tmp.end(), Decoder::descending_compare<T>);
+        std::nth_element(tmp.begin(), tmp.begin() + decoder->beam_width, tmp.end(), Decoder::descending_compare<T>);
 
-        std::copy_n(tmp.begin(), this->beam_width, std::back_inserter(prefixes));
+        std::copy_n(tmp.begin(), decoder->beam_width, std::back_inserter(prefixes));
         tmp.clear();
 
     }
@@ -214,6 +148,83 @@ void zctc::Decoder::decode(
         iter_val++;
     }
 
+    return 0;
+
+}
+
+
+} // namespace zctc
+
+/* ---------------------------------------------------------------------------- */
+
+
+template <typename T>
+bool zctc::Decoder::descending_compare(zctc::Node<T>* x, zctc::Node<T>* y) {
+    return x->score > y->score;
+}
+
+std::string zctc::Decoder::get_token_from_id(int id) const {
+    return this->vocab[id];
+}
+
+template <typename T>
+void zctc::Decoder::batch_decode(
+    py::array_t<T>& batch_log_logits,
+    py::array_t<int>& batch_sorted_ids,
+    py::array_t<int>& batch_labels,
+    py::array_t<int>& batch_timesteps,
+    py::array_t<int>& batch_seq_len,
+    const int batch_size,
+    const int max_seq_len
+    ) const {
+
+    py::buffer_info logits_buf = batch_log_logits.request();
+    py::buffer_info ids_buf = batch_sorted_ids.request();
+    py::buffer_info labels_buf = batch_labels.request();
+    py::buffer_info timesteps_buf = batch_timesteps.request();
+    py::buffer_info seq_len_buf = batch_seq_len.request();
+
+    if (
+        logits_buf.ndim != 3 ||
+        ids_buf.ndim != 3 ||
+        labels_buf.ndim != 3 ||
+        timesteps_buf.ndim != 3 ||
+        seq_len_buf.ndim != 1
+    )
+        throw std::runtime_error(
+            "Logits must be three dimensional, like Batch x Seq-len x Vocab, "
+            "and Sequence Length must be one dimensional, like Batch"
+        );
+
+    int* ids = (int*)ids_buf.ptr;
+    int* labels = (int*)labels_buf.ptr;
+    int* timesteps = (int*)timesteps_buf.ptr;
+    int* seq_len = (int*)seq_len_buf.ptr;
+    T* logits = (T*)logits_buf.ptr;
+
+    ThreadPool pool(this->thread_count);
+    std::vector<std::future<int>> results;
+
+    if (batch_size > 1) {
+        for (int i = 1, ip_pos = 0, op_pos = 0; i < batch_size; i++) {
+            ip_pos = i * max_seq_len * this->vocab_size;
+            op_pos = i * this->beam_width * max_seq_len;
+
+            results.emplace_back(
+                pool.enqueue(
+                    zctc::decode<T>, this, logits + ip_pos, ids + ip_pos, labels + op_pos, timesteps + op_pos, *(seq_len + i)
+                )
+            );
+        }
+    }
+
+    zctc::decode(this, logits, ids, labels, timesteps, *seq_len);
+
+    if (batch_size > 1) {
+        for (auto&& result : results)
+            if (result.get() != 0)
+                throw std::runtime_error("Unexpected error occured during execution");
+    }
 }
 
 #endif // _ZCTC_DECODER_H

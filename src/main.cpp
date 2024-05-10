@@ -65,7 +65,7 @@ int main(int argc, char** argv) {
     std::vector<int> labels(decoder.beam_width, 0);
     std::vector<int> timesteps(decoder.beam_width, 0);
 
-    decoder.decode(logits.data(), sorted_indices.data(), labels.data(), timesteps.data(), 2);
+    zctc::decode<float>(&decoder, logits.data(), sorted_indices.data(), labels.data(), timesteps.data(), 2);
 
     return 0;
 }

@@ -9,8 +9,15 @@ if(NOT DEFINED PYTHON_EXECUTABLE OR NOT DEFINED CMAKE_INSTALL_PREFIX OR NOT DEFI
     message(FATAL_ERROR "Please specify PYTHON_EXECUTABLE and CMAKE_INSTALL_PREFIX and PYTHON_INCLUDE_DIR and FST_DIR")
 endif()
 
-add_compile_options(-Wall -pedantic -fPIC -DKENLM_MAX_ORDER=6)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -pedantic -fPIC -DKENLM_MAX_ORDER=6")
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g")
+
 find_package(Boost REQUIRED)
+find_library(Z_LIB NAMES z)
+find_library(BZ2_LIB NAMES bz2)
+find_library(LZMA_LIB NAMES lzma)
+
 include(FetchContent)
 
 FetchContent_Declare(
@@ -26,7 +33,7 @@ FetchContent_Declare(
 FetchContent_Declare(
     threadpool_external
     GIT_REPOSITORY https://github.com/progschj/ThreadPool.git
-    GIT_TAG 9a42ec1329f259a5f4881a291db1dcb8f2ad9040
+    GIT_TAG 9a42ec13
 )
 
 FetchContent_MakeAvailable(pybind11 kenlm_external threadpool_external)
@@ -36,11 +43,33 @@ file(GLOB FST_SOURCES ${FST_DIR}/src/lib/*.cc ${FST_DIR}/src/script/*.cc)
 pybind11_add_module(_zctc SHARED ${CMAKE_SOURCE_DIR}/src/binding.cpp ${FST_SOURCES})
 include_directories(${CMAKE_SOURCE_DIR}/include ${pybind11_INCLUDE_DIR} ${PYTHON_INCLUDE_DIR} ${FST_DIR}/src/include ${FETCHCONTENT_BASE_DIR}/kenlm_external-src ${FETCHCONTENT_BASE_DIR}/threadpool_external-src)
 
-target_link_libraries(_zctc PUBLIC ${PYTHON_LIBRARIES} kenlm_filter kenlm_builder kenlm_util kenlm z bz2 lzma pthread dl util)
-install(TARGETS _zctc DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
+target_link_libraries(_zctc PUBLIC ${PYTHON_LIBRARIES} kenlm_filter kenlm_builder kenlm_util kenlm pthread dl util)
+if(TARGET z)
+    target_link_libraries(_zctc PUBLIC z)
+endif()
+if(TARGET bz2)
+    target_link_libraries(_zctc PUBLIC bz2)
+endif()
+if(TARGET lzma)
+    target_link_libraries(_zctc PUBLIC lzma)
+endif()
 
-add_executable(zctc ${CMAKE_SOURCE_DIR}/src/main.cpp ${FST_SOURCES})
-target_link_libraries(zctc PUBLIC ${PYTHON_LIBRARIES} kenlm_filter kenlm_builder kenlm_util kenlm z bz2 lzma pthread dl util)
-install(TARGETS zctc DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
+install(TARGETS _zctc LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
+set_target_properties(_zctc kenlm_filter kenlm_builder kenlm_util kenlm PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${LIBRARY_OUTPUT_DIRECTORY})
 
-set_target_properties(_zctc zctc kenlm_filter kenlm_builder kenlm_util kenlm PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+if(${CMAKE_BUILD_TYPE} STREQUAL Debug)
+    add_executable(zctc ${CMAKE_SOURCE_DIR}/src/main.cpp ${FST_SOURCES})
+    target_link_libraries(zctc PUBLIC ${PYTHON_LIBRARIES} kenlm_filter kenlm_builder kenlm_util kenlm pthread dl util)
+    if(TARGET z)
+        target_link_libraries(zctc PUBLIC z)
+    endif()
+    if(TARGET bz2)
+        target_link_libraries(zctc PUBLIC bz2)
+    endif()
+    if(TARGET lzma)
+        target_link_libraries(zctc PUBLIC lzma)
+    endif()
+
+    install(TARGETS zctc RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
+    set_target_properties(zctc PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${LIBRARY_OUTPUT_DIRECTORY})
+endif()

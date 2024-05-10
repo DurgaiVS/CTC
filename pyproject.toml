@@ -10,6 +10,11 @@ build = "build.py"
 python = ">=3.9,<3.12"
 torch = ">=2.1"
 numpy = "*"
+pylint = "*"
+pre-commit = "*"
+black = "*"
+isort = "*"
+clang-format = "*"
 
 [tool.poetry.dev-dependencies]
 
