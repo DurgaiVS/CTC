@@ -15,6 +15,7 @@ pre-commit = "*"
 black = "*"
 isort = "*"
 clang-format = "*"
+requests = "*"
 
 [tool.poetry.dev-dependencies]
 
