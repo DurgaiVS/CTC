@@ -7,7 +7,6 @@ repos:
       - id: check-yaml
       - id: check-added-large-files
       - id: check-merge-conflict
-      - id: sort-simple-yaml
       - id: check-toml
 
   - repo: local
@@ -26,6 +25,10 @@ repos:
         name: clang-format
         entry: clang-format
         language: python
+        args:
+          - -i
+          - "**/**/*hh"
+          - "**/*cpp"
       - id: pylint
         name: pylint
         entry: pylint

@@ -56,18 +56,23 @@ class CTCDecoder(Registrable, _Decoder):
     ) -> tuple[numpy.ndarray, numpy.ndarray]:
         batch_size, seq_len, _ = logits.shape
 
-        sorted_indices = torch.argsort(logits, dim=2, descending=True).to(torch.int32)
+        sorted_indices = (
+            torch.argsort(logits, dim=2, descending=True)
+            .cpu()
+            .numpy()
+            .astype(numpy.int32)
+        )
         labels = numpy.zeros((batch_size, self.beam_width, seq_len), dtype=numpy.int32)
         timesteps = numpy.zeros(
             (batch_size, self.beam_width, seq_len), dtype=numpy.int32
         )
 
         self.batch_decode(
-            logits.numpy(),
-            sorted_indices.numpy(),
+            logits.cpu().numpy(),
+            sorted_indices,
             labels,
             timesteps,
-            seq_lens.numpy(),
+            seq_lens.cpu().numpy().astype(numpy.int32),
             batch_size,
             seq_len,
         )
