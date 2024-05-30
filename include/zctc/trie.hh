@@ -17,7 +17,7 @@ class Node {
 public:
     bool arc_exist, is_start_of_word;
     const int id, timestep;
-    T prob, parent_scr, lm_prob, score, penalty, max_prob;
+    T prob, parent_scr, lm_prob, score, penalty;
     const std::string& token;
     Node<T>* parent;
     lm::ngram::State lm_state;
@@ -30,32 +30,10 @@ public:
         , timestep(timestep)
         , prob(prob)
         , penalty(penalty)
-        , max_prob(prob)
         , token(token)
         , parent_scr(static_cast<T>(zctc::ZERO))
         , lm_prob(static_cast<T>(zctc::ZERO))
-        , score(prob)
-        , parent(parent)
-    {
-        if (this->parent == nullptr)
-            return;
-
-        this->parent_scr = parent->score;
-
-        this->parent->childs.push_back(this);
-    }
-
-    Node(int id, int timestep, T prob, T penalty, T max_prob, const std::string& token, Node<T>* parent)
-        : arc_exist(false)
-        , id(id)
-        , timestep(timestep)
-        , prob(prob)
-        , penalty(penalty)
-        , max_prob(max_prob)
-        , token(token)
-        , parent_scr(static_cast<T>(zctc::ZERO))
-        , lm_prob(static_cast<T>(zctc::ZERO))
-        , score(prob)
+        , score(static_cast<T>(zctc::ZERO))
         , parent(parent)
     {
         if (this->parent == nullptr)
@@ -106,15 +84,12 @@ zctc::Node<T>::add_to_child(int id, int timestep, T prob, const std::string& tok
 
     if (id == this->id) {
 
-        T max_prob = prob;
-
-        if (prob < this->max_prob) {
-            timestep = this->timestep;
-            max_prob = this->max_prob;
-        }
-
         *is_repeat = true;
-        child = new Node<T>(id, timestep, prob + this->prob, this->penalty, max_prob, token, this->parent);
+
+        if (prob > this->prob)
+            child = new Node<T>(id, timestep, prob, this->penalty, token, this->parent);
+        else
+            child = this;
 
     } else {
 

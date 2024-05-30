@@ -136,6 +136,12 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
         child = prefix;
 
         while (child->parent != nullptr) {
+            // if blank node, won't be written to output
+            if (child->id == decoder->blank_id) {
+                child = child->parent;
+                continue;
+            }
+
             *curr_l = child->id;
             *curr_t = child->timestep;
 
