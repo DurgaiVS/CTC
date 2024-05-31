@@ -90,8 +90,13 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
                 } else {
 
                     // only non-blank and repeated token's LM probs will be used
-                    if (!is_blank)
+                    if (!is_blank) {
                         child->lm_prob = child->parent->lm_prob;
+                    } else {
+                        // making the prob of blank node to 0, to avoid pruning of unintended other nodes
+                        child->prob = static_cast<T>(zctc::ZERO);
+                        // for blank, the lm_prob will itself be 0
+                    }
 
                     child->lm_state = child->parent->lm_state;
                     child->lexicon_state = child->parent->lexicon_state;
@@ -136,11 +141,6 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
         child = prefix;
 
         while (child->parent != nullptr) {
-            // if blank node, won't be written to output
-            if (child->id == decoder->blank_id) {
-                child = child->parent;
-                continue;
-            }
 
             *curr_l = child->id;
             *curr_t = child->timestep;

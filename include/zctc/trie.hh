@@ -86,10 +86,11 @@ zctc::Node<T>::add_to_child(int id, int timestep, T prob, const std::string& tok
 
         *is_repeat = true;
 
-        if (prob > this->prob)
+        if (prob > this->prob) {
             child = new Node<T>(id, timestep, prob, this->penalty, token, this->parent);
-        else
+        } else {
             child = this;
+        }
 
     } else {
 
