@@ -50,16 +50,17 @@ int
 decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, const int seq_len)
 {
 
-    T nucleus_max = static_cast<T>(decoder->nucleus_prob_per_timestep);
-
+    T nucleus_max, nucleus_count, prob;
     bool is_repeat, is_blank;
     int iter_val;
     int *curr_id, *curr_l, *curr_t;
     zctc::Node<T>* child;
     std::vector<zctc::Node<T>*> prefixes, tmp;
-    zctc::Node<T> root(zctc::ROOT_ID, -1, static_cast<T>(zctc::ZERO), static_cast<T>(decoder->penalty), "<s>", nullptr);
+    zctc::Node<T> root(zctc::ROOT_ID, -1, true, static_cast<T>(zctc::ZERO), static_cast<T>(decoder->penalty), "<s>",
+                       nullptr);
     fst::SortedMatcher<fst::StdVectorFst> matcher(decoder->ext_scorer.lexicon, fst::MATCH_INPUT);
 
+    nucleus_max = static_cast<T>(decoder->nucleus_prob_per_timestep);
     decoder->ext_scorer.initialise_start_states(&root);
     prefixes.reserve(decoder->beam_width);
     tmp.reserve(decoder->beam_width);
@@ -67,21 +68,22 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
     prefixes.push_back(&root);
 
     for (int t = 0; t < seq_len; t++) {
-        T nucleus_count = 0;
+        nucleus_count = 0;
         iter_val = t * decoder->vocab_size;
         curr_id = ids + iter_val;
 
-        for (int i = 0; i < decoder->cutoff_top_n; i++, curr_id++) {
-            int index = *curr_id;
-            T prob = logits[iter_val + index];
+        for (int i = 0, index = 0; i < decoder->cutoff_top_n; i++, curr_id++) {
+            index = *curr_id;
+            prob = logits[iter_val + index];
 
+            is_blank = index == decoder->blank_id;
             nucleus_count += prob;
 
             for (zctc::Node<T>* prefix : prefixes) {
 
-                child = prefix->add_to_child(index, t, prob, decoder->vocab[index], &is_repeat);
-                is_blank = child->id == decoder->blank_id;
+                child = prefix->add_to_child(index, t, prob, decoder->vocab[index], is_blank);
                 tmp.push_back(child);
+                is_repeat = child->id == prefix->id;
 
                 if (!(is_blank || is_repeat)) {
                     // only run ext scoring for non-duplicate and non-blank tokens
@@ -91,21 +93,24 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 
                     // only non-blank and repeated token's LM probs will be used
                     if (!is_blank) {
-                        child->lm_prob = child->parent->lm_prob;
-                    } else {
-                        // making the prob of blank node to 0, to avoid pruning of unintended other nodes
-                        child->prob = static_cast<T>(zctc::ZERO);
-                        // for blank, the lm_prob will itself be 0
+                        child->lm_prob = prefix->lm_prob;
                     }
 
-                    child->lm_state = child->parent->lm_state;
-                    child->lexicon_state = child->parent->lexicon_state;
-                    child->arc_exist = child->parent->arc_exist;
+                    // TODO: try commenting the below line and check...
+                    // else {
+                    // making the prob of blank node to 0, to avoid pruning of unintended other nodes
+                    // child->prob = static_cast<T>(zctc::ZERO);
+                    // for blank, the lm_prob will itself be 0
+                    // }
+
+                    child->lm_state = prefix->lm_state;
+                    child->lexicon_state = prefix->lexicon_state;
+                    child->arc_exist = prefix->arc_exist;
                 }
 
                 // update total score for the node,
                 // considering probs, LM probs, OOV penalty
-                child->update_score(is_blank);
+                child->update_score();
             }
 
             if (nucleus_count >= nucleus_max)

@@ -15,17 +15,18 @@ namespace zctc {
 template <typename T>
 class Node {
 public:
-    bool arc_exist, is_start_of_word;
+    bool arc_exist, is_start_of_word, is_blank;
     const int id, timestep;
     T prob, parent_scr, lm_prob, score, penalty;
-    const std::string& token;
+    const std::string token;
     Node<T>* parent;
     lm::ngram::State lm_state;
     fst::StdVectorFst::StateId lexicon_state;
     std::vector<Node<T>*> childs;
 
-    Node(int id, int timestep, T prob, T penalty, const std::string& token, Node<T>* parent)
+    Node(int id, int timestep, bool is_blank, T prob, T penalty, const std::string token, Node<T>* parent)
         : arc_exist(false)
+        , is_blank(is_blank)
         , id(id)
         , timestep(timestep)
         , prob(prob)
@@ -50,9 +51,9 @@ public:
             delete child;
     }
 
-    inline void update_score(bool is_blank) noexcept;
+    inline void update_score() noexcept;
 
-    Node<T>* add_to_child(int id, int timestep, T prob, const std::string& token, bool* is_repeat);
+    Node<T>* add_to_child(int id, int timestep, T prob, const std::string token, bool is_blank);
 
     // element-wise iterator for this class,
     typename std::vector<Node<T>*>::iterator begin() noexcept { return this->childs.begin(); }
@@ -67,35 +68,31 @@ public:
 
 template <typename T>
 void
-zctc::Node<T>::update_score(bool is_blank) noexcept
+zctc::Node<T>::update_score() noexcept
 {
     this->score = this->parent_scr + this->prob + this->lm_prob;
 
-    if (!(this->arc_exist || is_blank))
+    if (!(this->arc_exist || this->is_blank))
         this->score += this->penalty;
 }
 
 template <typename T>
 zctc::Node<T>*
-zctc::Node<T>::add_to_child(int id, int timestep, T prob, const std::string& token, bool* is_repeat)
+zctc::Node<T>::add_to_child(int id, int timestep, T prob, const std::string token, bool is_blank)
 {
 
     Node<T>* child;
 
     if (id == this->id) {
 
-        *is_repeat = true;
-
         if (prob > this->prob) {
-            child = new Node<T>(id, timestep, prob, this->penalty, token, this->parent);
+            child = new Node<T>(id, timestep, is_blank, prob, this->penalty, token, this->parent);
         } else {
             child = this;
         }
 
     } else {
-
-        *is_repeat = false;
-        child = new Node<T>(id, timestep, prob, this->penalty, token, this);
+        child = new Node<T>(id, timestep, is_blank, prob, this->penalty, token, this);
     }
 
     return child;

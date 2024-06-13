@@ -80,10 +80,12 @@ main(int argc, char** argv)
     std::vector<int> timesteps(decoder.beam_width * seq_len, 0);
 
     // To generate random values for logits
+    int temp = 0;
     std::random_device rnd_device;
     std::mt19937 mersenne_engine { rnd_device() };
     std::uniform_real_distribution<float> dist { 0.0, 1.0 };
     auto gen = [&dist, &mersenne_engine]() { return dist(mersenne_engine); };
+    auto sorter = [&logits, &temp](int a, int b) { return logits[temp + a] > logits[temp + b]; };
 
     for (int t = 0, temp = 0; t < iter_count; t++) {
 
@@ -94,7 +96,7 @@ main(int argc, char** argv)
             temp = i * decoder.vocab_size;
             std::iota(sorted_indices.begin() + temp, sorted_indices.begin() + (temp + decoder.vocab_size), 0);
             std::stable_sort(sorted_indices.begin() + temp, sorted_indices.begin() + (temp + decoder.vocab_size),
-                             [&logits, &temp](int a, int b) { return logits[temp + a] > logits[temp + b]; });
+                             sorter);
         }
 
         zctc::decode<float>(&decoder, logits.data(), sorted_indices.data(), labels.data(), timesteps.data(), seq_len);

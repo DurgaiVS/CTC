@@ -14,7 +14,7 @@ public:
     const int apostrophe_id;
     const float lm_alpha;
     lm::base::Model* lm;
-    fst::StdVectorFst *lexicon, *hw_fst;
+    fst::StdVectorFst* lexicon;
 
     ExternalScorer(char tok_sep, int apostrophe_id, float lm_alpha, char* lm_path, char* lexicon_path)
         : tok_sep(tok_sep)
@@ -22,7 +22,6 @@ public:
         , lm_alpha(lm_alpha)
         , lm(nullptr)
         , lexicon(nullptr)
-        , hw_fst(nullptr)
     {
 
         if (lm_path)
@@ -39,9 +38,6 @@ public:
 
         if (this->lexicon)
             delete this->lexicon;
-
-        if (this->hw_fst)
-            delete this->hw_fst;
     }
 
     template <typename T>
@@ -115,8 +111,6 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* prefix, fst::SortedMatcher<
     } else {
         prefix->arc_exist = true;
     }
-
-    if (this->hw_fst) { }
 }
 
 #endif // _ZCTC_EXT_SCORER_H

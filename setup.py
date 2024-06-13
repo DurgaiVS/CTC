@@ -60,7 +60,7 @@ class CMakeBuild(build_ext):
         ]
 
         # example of build args
-        build_args = ["--config", config, "--", "-j" + str(max(min(os.cpu_count() - 2, 32), 1))]
+        build_args = ["--config", config, "--", "-j" + str(min(os.cpu_count(), 32))]
 
         subprocess.run(
             ["cmake", str(ext.sourcedir), *cmake_args], cwd=build_temp, check=True
