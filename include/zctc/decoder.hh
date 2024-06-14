@@ -96,6 +96,15 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
                         child->lm_prob = prefix->lm_prob;
                     }
 
+                    if (!(is_repeat && (child->timestep == prefix->timestep))) {
+                        // in case of repeated token but with less confidence, then
+                        // the node will not be added to path. Hence the child
+                        // will be the prefix(same pointer).
+                        child->lm_state = prefix->lm_state;
+                        child->lexicon_state = prefix->lexicon_state;
+                        child->arc_exist = prefix->arc_exist;
+                    }
+
                     // TODO: try commenting the below line and check...
                     // else {
                     // making the prob of blank node to 0, to avoid pruning of unintended other nodes
@@ -103,9 +112,6 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
                     // for blank, the lm_prob will itself be 0
                     // }
 
-                    child->lm_state = prefix->lm_state;
-                    child->lexicon_state = prefix->lexicon_state;
-                    child->arc_exist = prefix->arc_exist;
                 }
 
                 // update total score for the node,
