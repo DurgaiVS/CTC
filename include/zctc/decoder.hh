@@ -1,6 +1,8 @@
 #ifndef _ZCTC_DECODER_H
 #define _ZCTC_DECODER_H
 
+#include <cmath>
+
 #include <ThreadPool.h>
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
@@ -50,9 +52,9 @@ int
 decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, const int seq_len)
 {
 
-    T nucleus_max, nucleus_count, prob;
     bool is_repeat, is_blank;
     int iter_val;
+    T nucleus_max, nucleus_count, prob;
     int *curr_id, *curr_l, *curr_t;
     zctc::Node<T>* child;
     std::vector<zctc::Node<T>*> prefixes, tmp;
@@ -78,6 +80,7 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 
             is_blank = index == decoder->blank_id;
             nucleus_count += prob;
+            prob = std::log(prob);
 
             for (zctc::Node<T>* prefix : prefixes) {
 
@@ -111,7 +114,6 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
                     // child->prob = static_cast<T>(zctc::ZERO);
                     // for blank, the lm_prob will itself be 0
                     // }
-
                 }
 
                 // update total score for the node,

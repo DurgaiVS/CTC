@@ -85,7 +85,7 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* prefix, fst::SortedMatcher<
 
         lm::WordIndex word_id = this->lm->BaseVocabulary().Index(prefix->token);
         prefix->lm_prob
-            = this->lm_alpha + this->lm->BaseScore(&(prefix->parent->lm_state), word_id, &(prefix->lm_state));
+            = this->lm_alpha * this->lm->BaseScore(&(prefix->parent->lm_state), word_id, &(prefix->lm_state));
     }
 
     if (this->lexicon) {

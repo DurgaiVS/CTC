@@ -1,6 +1,5 @@
 __all__ = ["_Decoder", "CTCDecoder"]
 
-import math
 from typing import Optional
 
 import numpy
@@ -34,7 +33,6 @@ class CTCDecoder(Registrable, _Decoder):
         lexicon_fst_path: Optional[str] = None,
     ):
         apostrophe_id = get_apostrophe_id_from_vocab(vocab)
-        lm_alpha = math.log(lm_alpha)
 
         super().__init__(
             thread_count,
@@ -54,6 +52,9 @@ class CTCDecoder(Registrable, _Decoder):
     def decode(
         self, logits: torch.Tensor, seq_lens: torch.Tensor
     ) -> tuple[numpy.ndarray, numpy.ndarray]:
+        """
+        Expecting the logits to be softmaxed and not in log scale.
+        """
         batch_size, seq_len, _ = logits.shape
 
         sorted_indices = (
