@@ -41,8 +41,6 @@ public:
             return;
 
         this->parent_scr = parent->score;
-
-        this->parent->childs.push_back(this);
     }
 
     ~Node()
@@ -53,7 +51,7 @@ public:
 
     inline void update_score() noexcept;
 
-    Node<T>* add_to_child(int id, int timestep, T prob, const std::string token, bool is_blank);
+    Node<T>* add_to_child(int id, int timestep, T prob, const std::string token, bool is_blank, bool* is_repeat);
 
     // element-wise iterator for this class,
     typename std::vector<Node<T>*>::iterator begin() noexcept { return this->childs.begin(); }
@@ -78,7 +76,7 @@ zctc::Node<T>::update_score() noexcept
 
 template <typename T>
 zctc::Node<T>*
-zctc::Node<T>::add_to_child(int id, int timestep, T prob, const std::string token, bool is_blank)
+zctc::Node<T>::add_to_child(int id, int timestep, T prob, const std::string token, bool is_blank, bool* is_repeat)
 {
 
     Node<T>* child;
@@ -86,13 +84,16 @@ zctc::Node<T>::add_to_child(int id, int timestep, T prob, const std::string toke
     if (id == this->id) {
 
         if (prob > this->prob) {
-            child = new Node<T>(id, timestep, is_blank, prob, this->penalty, token, this->parent);
+            child = this->parent->add_to_child(id, timestep, prob, token, is_blank, is_repeat);
         } else {
             child = this;
         }
+        *is_repeat = true;
 
     } else {
+        *is_repeat = false;
         child = new Node<T>(id, timestep, is_blank, prob, this->penalty, token, this);
+        this->childs.push_back(child);
     }
 
     return child;

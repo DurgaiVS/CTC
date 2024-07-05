@@ -12,14 +12,16 @@ class ExternalScorer {
 public:
     const char tok_sep;
     const int apostrophe_id;
-    const float lm_alpha;
+    const float lm_alpha, penalty;
     lm::base::Model* lm;
     fst::StdVectorFst* lexicon;
 
-    ExternalScorer(char tok_sep, int apostrophe_id, float lm_alpha, char* lm_path, char* lexicon_path)
+    ExternalScorer(char tok_sep, int apostrophe_id, float lm_alpha, float penalty, const char* lm_path,
+                   const char* lexicon_path)
         : tok_sep(tok_sep)
         , apostrophe_id(apostrophe_id)
         , lm_alpha(lm_alpha)
+        , penalty(penalty)
         , lm(nullptr)
         , lexicon(nullptr)
     {
@@ -84,8 +86,13 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* prefix, fst::SortedMatcher<
     if (this->lm) {
 
         lm::WordIndex word_id = this->lm->BaseVocabulary().Index(prefix->token);
-        prefix->lm_prob
-            = this->lm_alpha * this->lm->BaseScore(&(prefix->parent->lm_state), word_id, &(prefix->lm_state));
+
+        if (word_id == 0) { // OOV char
+            prefix->lm_prob = this->penalty;
+        } else {
+            prefix->lm_prob
+                = this->lm_alpha * this->lm->BaseScore(&(prefix->parent->lm_state), word_id, &(prefix->lm_state));
+        }
     }
 
     if (this->lexicon) {

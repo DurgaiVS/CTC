@@ -28,7 +28,7 @@ public:
 
     Decoder(int thread_count, int blank_id, int cutoff_top_n, int apostrophe_id, float nucleus_prob_per_timestep,
             float lm_alpha, std::size_t beam_width, float penalty, char tok_sep, std::vector<std::string> vocab,
-            char* lm_path, char* lexicon_path)
+            const char* lm_path, const char* lexicon_path)
         : thread_count(thread_count)
         , blank_id(blank_id)
         , cutoff_top_n(cutoff_top_n)
@@ -37,7 +37,7 @@ public:
         , penalty(penalty)
         , beam_width(beam_width)
         , vocab(vocab)
-        , ext_scorer(tok_sep, apostrophe_id, lm_alpha, lm_path, lexicon_path)
+        , ext_scorer(tok_sep, apostrophe_id, lm_alpha, penalty, lm_path, lexicon_path)
     {
     }
 
@@ -84,37 +84,33 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 
             for (zctc::Node<T>* prefix : prefixes) {
 
-                child = prefix->add_to_child(index, t, prob, decoder->vocab[index], is_blank);
+                child = prefix->add_to_child(index, t, prob, decoder->vocab[index], is_blank, &is_repeat);
                 tmp.push_back(child);
-                is_repeat = child->id == prefix->id;
 
                 if (!(is_blank || is_repeat)) {
                     // only run ext scoring for non-duplicate and non-blank tokens
                     decoder->ext_scorer.run_ext_scoring(child, &matcher);
 
-                } else {
+                } else if (!(is_repeat && (child->timestep == prefix->timestep))) {
+                    // in case of repeated token but with less confidence, then
+                    // the node will not be added to path. Hence the child
+                    // will be the prefix(same pointer).
+                    child->lm_state = prefix->lm_state;
+                    child->lexicon_state = prefix->lexicon_state;
+                    child->arc_exist = prefix->arc_exist;
 
                     // only non-blank and repeated token's LM probs will be used
                     if (!is_blank) {
                         child->lm_prob = prefix->lm_prob;
                     }
-
-                    if (!(is_repeat && (child->timestep == prefix->timestep))) {
-                        // in case of repeated token but with less confidence, then
-                        // the node will not be added to path. Hence the child
-                        // will be the prefix(same pointer).
-                        child->lm_state = prefix->lm_state;
-                        child->lexicon_state = prefix->lexicon_state;
-                        child->arc_exist = prefix->arc_exist;
-                    }
-
-                    // TODO: try commenting the below line and check...
-                    // else {
-                    // making the prob of blank node to 0, to avoid pruning of unintended other nodes
-                    // child->prob = static_cast<T>(zctc::ZERO);
-                    // for blank, the lm_prob will itself be 0
-                    // }
                 }
+
+                // TODO: try commenting the below line and check...
+                // else {
+                // making the prob of blank node to 0, to avoid pruning of unintended other nodes
+                // child->prob = static_cast<T>(zctc::ZERO);
+                // for blank, the lm_prob will itself be 0
+                // }
 
                 // update total score for the node,
                 // considering probs, LM probs, OOV penalty
@@ -140,7 +136,7 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
         tmp.clear();
     }
 
-    std::sort(prefixes.begin(), prefixes.end(), Decoder::descending_compare<T>);
+    std::stable_sort(prefixes.begin(), prefixes.end(), Decoder::descending_compare<T>);
 
     iter_val = 1;
     for (zctc::Node<T>* prefix : prefixes) {
@@ -151,18 +147,16 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
         curr_t = timestep + ((seq_len * iter_val) - 1);
         curr_l = label + ((seq_len * iter_val) - 1);
 
-        child = prefix;
+        while (prefix->id != zctc::ROOT_ID) {
 
-        while (child->parent != nullptr) {
-
-            *curr_l = child->id;
-            *curr_t = child->timestep;
+            *curr_l = prefix->id;
+            *curr_t = prefix->timestep;
 
             // if index becomes less than 0, might throw error
             curr_l--;
             curr_t--;
 
-            child = child->parent;
+            prefix = prefix->parent;
         }
 
         iter_val++;

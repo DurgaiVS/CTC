@@ -20,7 +20,7 @@ display_help()
 }
 
 int
-load_vocab(std::vector<std::string>& vocab, char* vocab_path)
+load_vocab(std::vector<std::string>& vocab, const char* vocab_path)
 {
 
     std::ifstream inputFile(vocab_path);
@@ -43,36 +43,50 @@ load_vocab(std::vector<std::string>& vocab, char* vocab_path)
 int
 main(int argc, char** argv)
 {
-    if (argc != 5 || argc != 6) {
-        display_help();
-        return 1;
+    std::string lm_path;
+    std::string lexicon_path;
+    std::string vocab_path;
+    int iter_count;
+    int blank_id;
+
+    if (argc == 5 || argc == 6) {
+        lm_path = argv[1];
+        lexicon_path = argv[2];
+        vocab_path = argv[3];
+        iter_count = std::stoi(argv[4]);
+
+        if (argc == 6) {
+            blank_id = std::stoi(argv[5]);
+        } else {
+            blank_id = 0;
+        }
+    } else {
+        std::cout << "Enter lm path: ";
+        std::cin >> lm_path;
+        std::cout << "Enter lexicon path: ";
+        std::cin >> lexicon_path;
+        std::cout << "Enter vocab path: ";
+        std::cin >> vocab_path;
+        std::cout << "Enter number of iterations to run: ";
+        std::cin >> iter_count;
+        std::cout << "Enter blank id: ";
+        std::cin >> blank_id;
     }
 
     char tok_sep = '#';
-    char* lm_path = argv[1];
-    char* lexicon_path = argv[2];
-    char* vocab_path = argv[3];
-
     int seq_len = 250;
     int thread_count = 1;
     int cutoff_top_n = 25;
-    int iter_count = std::stoi(argv[4]);
-    int blank_id;
-    if (argc == 6)
-        blank_id = std::stoi(argv[5]);
-    else
-        blank_id = 0;
-
     float nucleus_prob_per_timestep = 1.0;
     float penalty = -5.0;
     float lm_alpha = 0.017;
 
-    std::size_t beam_width = 20;
+    std::size_t beam_width = 250;
     std::vector<std::string> vocab;
-    int apostrophe_id = load_vocab(vocab, vocab_path);
+    int apostrophe_id = load_vocab(vocab, vocab_path.c_str());
 
     zctc::Decoder decoder(thread_count, blank_id, cutoff_top_n, apostrophe_id, nucleus_prob_per_timestep, lm_alpha,
-                          beam_width, penalty, tok_sep, vocab, lm_path, lexicon_path);
+                          beam_width, penalty, tok_sep, vocab, lm_path.c_str(), lexicon_path.c_str());
 
     std::vector<float> logits(decoder.vocab_size * seq_len);
     std::vector<int> sorted_indices(decoder.vocab_size * seq_len);
@@ -80,12 +94,10 @@ main(int argc, char** argv)
     std::vector<int> timesteps(decoder.beam_width * seq_len, 0);
 
     // To generate random values for logits
-    int temp = 0;
     std::random_device rnd_device;
     std::mt19937 mersenne_engine { rnd_device() };
-    std::uniform_real_distribution<float> dist { 0.0, 1.0 };
+    std::uniform_real_distribution<float> dist { 0.0f, 0.01f };
     auto gen = [&dist, &mersenne_engine]() { return dist(mersenne_engine); };
-    auto sorter = [&logits, &temp](int a, int b) { return logits[temp + a] > logits[temp + b]; };
 
     for (int t = 0, temp = 0; t < iter_count; t++) {
 
@@ -96,7 +108,7 @@ main(int argc, char** argv)
             temp = i * decoder.vocab_size;
             std::iota(sorted_indices.begin() + temp, sorted_indices.begin() + (temp + decoder.vocab_size), 0);
             std::stable_sort(sorted_indices.begin() + temp, sorted_indices.begin() + (temp + decoder.vocab_size),
-                             sorter);
+                             [&logits, &temp](int a, int b) { return logits[temp + a] > logits[temp + b]; });
         }
 
         zctc::decode<float>(&decoder, logits.data(), sorted_indices.data(), labels.data(), timesteps.data(), seq_len);
