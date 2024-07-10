@@ -17,7 +17,7 @@ class Node {
 public:
     bool arc_exist, is_start_of_word, is_blank;
     const int id, timestep;
-    T prob, parent_scr, lm_prob, score, penalty;
+    T prob, max_prob, parent_scr, lm_prob, score, penalty;
     const std::string token;
     Node<T>* parent;
     lm::ngram::State lm_state;
@@ -30,6 +30,27 @@ public:
         , id(id)
         , timestep(timestep)
         , prob(prob)
+        , max_prob(prob)
+        , penalty(penalty)
+        , token(token)
+        , parent_scr(static_cast<T>(zctc::ZERO))
+        , lm_prob(static_cast<T>(zctc::ZERO))
+        , score(static_cast<T>(zctc::ZERO))
+        , parent(parent)
+    {
+        if (this->parent == nullptr)
+            return;
+
+        this->parent_scr = parent->score;
+    }
+
+    Node(int id, int timestep, bool is_blank, T prob, T max_prob, T penalty, const std::string token, Node<T>* parent)
+        : arc_exist(false)
+        , is_blank(is_blank)
+        , id(id)
+        , timestep(timestep)
+        , prob(prob)
+        , max_prob(max_prob)
         , penalty(penalty)
         , token(token)
         , parent_scr(static_cast<T>(zctc::ZERO))
@@ -82,18 +103,22 @@ zctc::Node<T>::add_to_child(int id, int timestep, T prob, const std::string toke
     Node<T>* child;
 
     if (id == this->id) {
-
-        if (prob > this->prob) {
-            child = this->parent->add_to_child(id, timestep, prob, token, is_blank, is_repeat);
+        // checking whether the new repeat is more confident than previous ones.
+        if (prob > this->max_prob) {
+            // if it is, then changing the confidence threshold, accumulating the probs, and updating the timestep.
+            child = new Node<T>(id, timestep, is_blank, this->prob + prob, prob, this->penalty, token, this->parent);
         } else {
-            child = this;
+            // if not, just accumulating the probs
+            child = new Node<T>(this->id, this->timestep, is_blank, this->prob + prob, this->max_prob, this->penalty,
+                                token, this->parent);
         }
+        this->parent->childs.push_back(child);
         *is_repeat = true;
 
     } else {
-        *is_repeat = false;
         child = new Node<T>(id, timestep, is_blank, prob, this->penalty, token, this);
         this->childs.push_back(child);
+        *is_repeat = false;
     }
 
     return child;

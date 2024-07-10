@@ -4,9 +4,10 @@ from typing import Optional
 
 import numpy
 import torch
-from _zctc import _Decoder
 from omegaconf import DictConfig
 from registrable import Registrable
+
+from _zctc import _Decoder
 
 
 def get_apostrophe_id_from_vocab(vocab: list[str]) -> int:
@@ -33,6 +34,7 @@ class CTCDecoder(Registrable, _Decoder):
         lexicon_fst_path: Optional[str] = None,
     ):
         apostrophe_id = get_apostrophe_id_from_vocab(vocab)
+        assert apostrophe_id >= 0, "Cannot find apostrophe from the vocab provided"
 
         super().__init__(
             thread_count,
@@ -63,10 +65,12 @@ class CTCDecoder(Registrable, _Decoder):
             .numpy()
             .astype(numpy.int32)
         )
-        labels = numpy.zeros((batch_size, self.beam_width, seq_len), dtype=numpy.int32)
-        timesteps = numpy.zeros(
-            (batch_size, self.beam_width, seq_len), dtype=numpy.int32
-        )
+        labels = torch.zeros(
+            (batch_size, self.beam_width, seq_len), dtype=torch.int32
+        ).numpy()
+        timesteps = torch.zeros(
+            (batch_size, self.beam_width, seq_len), dtype=torch.int32
+        ).numpy()
 
         self.batch_decode(
             logits.cpu().numpy(),

@@ -10,14 +10,16 @@ build = "build.py"
 python = ">=3.9,<3.12"
 torch = ">=2.1"
 numpy = "*"
+omegaconf = "*"
+registrable = "*"
+
+[tool.poetry.dev-dependencies]
 pylint = "*"
 pre-commit = "*"
 black = "*"
 isort = "*"
 clang-format = "*"
 requests = "*"
-
-[tool.poetry.dev-dependencies]
 
 [build-system]
 build-backend = "poetry.core.masonry.api"

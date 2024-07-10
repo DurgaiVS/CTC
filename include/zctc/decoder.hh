@@ -65,7 +65,7 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
     nucleus_max = static_cast<T>(decoder->nucleus_prob_per_timestep);
     decoder->ext_scorer.initialise_start_states(&root);
     prefixes.reserve(decoder->beam_width);
-    tmp.reserve(decoder->beam_width);
+    tmp.reserve(decoder->cutoff_top_n * decoder->beam_width);
 
     prefixes.push_back(&root);
 
@@ -91,7 +91,7 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
                     // only run ext scoring for non-duplicate and non-blank tokens
                     decoder->ext_scorer.run_ext_scoring(child, &matcher);
 
-                } else if (!(is_repeat && (child->timestep == prefix->timestep))) {
+                } else {
                     // in case of repeated token but with less confidence, then
                     // the node will not be added to path. Hence the child
                     // will be the prefix(same pointer).
@@ -203,23 +203,17 @@ zctc::Decoder::batch_decode(py::array_t<T>& batch_log_logits, py::array_t<int>& 
     ThreadPool pool(this->thread_count);
     std::vector<std::future<int>> results;
 
-    if (batch_size > 1) {
-        for (int i = 1, ip_pos = 0, op_pos = 0; i < batch_size; i++) {
-            ip_pos = i * max_seq_len * this->vocab_size;
-            op_pos = i * this->beam_width * max_seq_len;
+    for (int i = 0, ip_pos = 0, op_pos = 0; i < batch_size; i++) {
+        ip_pos = i * max_seq_len * this->vocab_size;
+        op_pos = i * this->beam_width * max_seq_len;
 
-            results.emplace_back(pool.enqueue(zctc::decode<T>, this, logits + ip_pos, ids + ip_pos, labels + op_pos,
-                                              timesteps + op_pos, *(seq_len + i)));
-        }
+        results.emplace_back(pool.enqueue(zctc::decode<T>, this, logits + ip_pos, ids + ip_pos, labels + op_pos,
+                                          timesteps + op_pos, *(seq_len + i)));
     }
 
-    zctc::decode(this, logits, ids, labels, timesteps, *seq_len);
-
-    if (batch_size > 1) {
-        for (auto&& result : results)
-            if (result.get() != 0)
-                throw std::runtime_error("Unexpected error occured during execution");
-    }
+    for (auto&& result : results)
+        if (result.get() != 0)
+            throw std::runtime_error("Unexpected error occured during execution");
 }
 
 #endif // _ZCTC_DECODER_H

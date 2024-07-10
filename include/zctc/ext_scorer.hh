@@ -75,7 +75,7 @@ zctc::ExternalScorer::initialise_start_states(Node<T>* root) const
         root->lexicon_state = this->lexicon->Start();
 
     if (this->lm)
-        this->lm->NullContextWrite(&(root->lm_state));
+        this->lm->BeginSentenceWrite(&(root->lm_state));
 }
 
 template <typename T>
