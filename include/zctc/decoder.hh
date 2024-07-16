@@ -29,7 +29,7 @@ public:
 
     Decoder(int thread_count, int blank_id, int cutoff_top_n, int apostrophe_id, float nucleus_prob_per_timestep,
             float lm_alpha, std::size_t beam_width, float penalty, char tok_sep, std::vector<std::string> vocab,
-            const char* lm_path, const char* lexicon_path)
+            char* lm_path, char* lexicon_path)
         : thread_count(thread_count)
         , blank_id(blank_id)
         , cutoff_top_n(cutoff_top_n)
@@ -60,7 +60,7 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
     T nucleus_max, nucleus_count, prob;
     int *curr_id, *curr_l, *curr_t;
     zctc::Node<T>* child;
-    std::vector<zctc::Node<T>*> prefixes, tmp;
+    std::vector<zctc::Node<T>*> prefixes0, prefixes1;
     zctc::Node<T> root(zctc::ROOT_ID, -1, true, static_cast<T>(zctc::ZERO), static_cast<T>(decoder->penalty), "<s>",
                        nullptr);
     fst::SortedMatcher<fst::StdVectorFst> lexicon_matcher(decoder->ext_scorer.lexicon, fst::MATCH_INPUT);
@@ -68,12 +68,15 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 
     nucleus_max = static_cast<T>(decoder->nucleus_prob_per_timestep);
     decoder->ext_scorer.initialise_start_states(&root, hotwords_fst);
-    prefixes.reserve(decoder->beam_width);
-    tmp.reserve(decoder->cutoff_top_n * decoder->beam_width);
 
-    prefixes.push_back(&root);
+    prefixes0.reserve(decoder->cutoff_top_n * decoder->beam_width);
+    prefixes1.reserve(decoder->cutoff_top_n * decoder->beam_width);
+    prefixes0.push_back(&root);
 
     for (int t = 0; t < seq_len; t++) {
+        std::vector<zctc::Node<T>*>& reader = ((t % 2) == 0 ? prefixes0 : prefixes1);
+        std::vector<zctc::Node<T>*>& writer = ((t % 2) == 0 ? prefixes1 : prefixes0);
+
         nucleus_count = 0;
         iter_val = t * decoder->vocab_size;
         curr_id = ids + iter_val;
@@ -86,10 +89,10 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
             nucleus_count += prob;
             prob = std::log(prob);
 
-            for (zctc::Node<T>* prefix : prefixes) {
+            for (zctc::Node<T>* prefix : reader) {
 
                 child = prefix->add_to_child(index, t, prob, decoder->vocab[index], is_blank, &is_repeat);
-                tmp.push_back(child);
+                writer.push_back(child);
 
                 if (!(is_blank || is_repeat)) {
                     // only run ext scoring for non-duplicate and non-blank tokens.
@@ -124,25 +127,21 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
                 break;
         }
 
-        prefixes.clear();
+        reader.clear();
 
-        if (tmp.size() < decoder->beam_width) {
-            std::copy(tmp.begin(), tmp.end(), std::back_inserter(prefixes));
-
-            tmp.clear();
+        if (writer.size() < decoder->beam_width)
             continue;
-        }
 
-        std::nth_element(tmp.begin(), tmp.begin() + decoder->beam_width, tmp.end(), Decoder::descending_compare<T>);
-
-        std::copy_n(tmp.begin(), decoder->beam_width, std::back_inserter(prefixes));
-        tmp.clear();
+        std::nth_element(writer.begin(), writer.begin() + decoder->beam_width, writer.end(),
+                         Decoder::descending_compare<T>);
+        writer.erase(writer.begin() + decoder->beam_width, writer.end());
     }
 
-    std::stable_sort(prefixes.begin(), prefixes.end(), Decoder::descending_compare<T>);
+    std::vector<zctc::Node<T>*>& reader = ((seq_len % 2) == 0 ? prefixes0 : prefixes1);
+    std::stable_sort(reader.begin(), reader.end(), Decoder::descending_compare<T>);
 
     iter_val = 1;
-    for (zctc::Node<T>* prefix : prefixes) {
+    for (zctc::Node<T>* prefix : reader) {
 
         curr_t = timestep + ((seq_len * iter_val) - 1);
         curr_l = label + ((seq_len * iter_val) - 1);

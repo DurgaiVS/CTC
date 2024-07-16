@@ -16,8 +16,7 @@ public:
     lm::base::Model* lm;
     fst::StdVectorFst* lexicon;
 
-    ExternalScorer(char tok_sep, int apostrophe_id, float lm_alpha, float penalty, const char* lm_path,
-                   const char* lexicon_path)
+    ExternalScorer(char tok_sep, int apostrophe_id, float lm_alpha, float penalty, char* lm_path, char* lexicon_path)
         : tok_sep(tok_sep)
         , apostrophe_id(apostrophe_id)
         , lm_alpha(lm_alpha)
@@ -65,7 +64,10 @@ zctc::ExternalScorer::start_of_word_check(Node<T>* prefix, fst::StdVectorFst* ho
     prefix->is_start_of_word = !(prefix->id == this->apostrophe_id || prefix->parent->id == this->apostrophe_id
                                  || prefix->token.at(0) == this->tok_sep);
 
-    if (prefix->is_start_of_word)
+    if (!prefix->is_start_of_word)
+        return;
+
+    if (this->lexicon)
         prefix->lexicon_state = this->lexicon->Start();
 
     if (hotwords_fst)
