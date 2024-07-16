@@ -10,6 +10,7 @@
 
 #include "./ext_scorer.hh"
 #include "./trie.hh"
+#include "./zfst.hh"
 
 namespace py = pybind11;
 
@@ -44,12 +45,14 @@ public:
     template <typename T>
     void batch_decode(py::array_t<T>& batch_log_logits, py::array_t<int>& batch_sorted_ids,
                       py::array_t<int>& batch_labels, py::array_t<int>& batch_timesteps,
-                      py::array_t<int>& batch_seq_len, const int batch_size, const int max_seq_len) const;
+                      py::array_t<int>& batch_seq_len, const int batch_size, const int max_seq_len,
+                      std::vector<std::vector<int>>& hotwords, std::vector<float>& hotwords_weight) const;
 };
 
 template <typename T>
 int
-decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, const int seq_len)
+decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, const int seq_len,
+       fst::StdVectorFst* hotwords_fst)
 {
 
     bool is_repeat, is_blank;
@@ -60,10 +63,11 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
     std::vector<zctc::Node<T>*> prefixes, tmp;
     zctc::Node<T> root(zctc::ROOT_ID, -1, true, static_cast<T>(zctc::ZERO), static_cast<T>(decoder->penalty), "<s>",
                        nullptr);
-    fst::SortedMatcher<fst::StdVectorFst> matcher(decoder->ext_scorer.lexicon, fst::MATCH_INPUT);
+    fst::SortedMatcher<fst::StdVectorFst> lexicon_matcher(decoder->ext_scorer.lexicon, fst::MATCH_INPUT);
+    fst::SortedMatcher<fst::StdVectorFst> hotwords_matcher(hotwords_fst, fst::MATCH_INPUT);
 
     nucleus_max = static_cast<T>(decoder->nucleus_prob_per_timestep);
-    decoder->ext_scorer.initialise_start_states(&root);
+    decoder->ext_scorer.initialise_start_states(&root, hotwords_fst);
     prefixes.reserve(decoder->beam_width);
     tmp.reserve(decoder->cutoff_top_n * decoder->beam_width);
 
@@ -88,32 +92,31 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
                 tmp.push_back(child);
 
                 if (!(is_blank || is_repeat)) {
-                    // only run ext scoring for non-duplicate and non-blank tokens
-                    decoder->ext_scorer.run_ext_scoring(child, &matcher);
+                    // only run ext scoring for non-duplicate and non-blank tokens.
+                    decoder->ext_scorer.run_ext_scoring(child, &lexicon_matcher, hotwords_fst, &hotwords_matcher);
 
                 } else {
-                    // in case of repeated token but with less confidence, then
-                    // the node will not be added to path. Hence the child
-                    // will be the prefix(same pointer).
+                    // in case of repeated token but with less confidence, the probs
+                    // will get included in the path, but we also will keep track of
+                    // the most confident probs and its timestep.
                     child->lm_state = prefix->lm_state;
+
                     child->lexicon_state = prefix->lexicon_state;
                     child->arc_exist = prefix->arc_exist;
 
-                    // only non-blank and repeated token's LM probs will be used
+                    child->hotword_state = prefix->hotword_state;
+                    child->hotword_length = prefix->hotword_length;
+                    child->hotword_weight = prefix->hotword_weight;
+                    child->is_hotpath = prefix->is_hotpath;
+
+                    // only non-blank and repeated token's LM probs will be used.
                     if (!is_blank) {
                         child->lm_prob = prefix->lm_prob;
                     }
                 }
 
-                // TODO: try commenting the below line and check...
-                // else {
-                // making the prob of blank node to 0, to avoid pruning of unintended other nodes
-                // child->prob = static_cast<T>(zctc::ZERO);
-                // for blank, the lm_prob will itself be 0
-                // }
-
                 // update total score for the node,
-                // considering probs, LM probs, OOV penalty
+                // considering probs, LM probs, OOV penalty.
                 child->update_score();
             }
 
@@ -140,9 +143,6 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 
     iter_val = 1;
     for (zctc::Node<T>* prefix : prefixes) {
-
-        // NOTE: getting an exception when running the exe `zctc`, might want to have a look
-        // prefix var pointing to some meaningless location, for last few elements
 
         curr_t = timestep + ((seq_len * iter_val) - 1);
         curr_l = label + ((seq_len * iter_val) - 1);
@@ -173,20 +173,28 @@ template <typename T>
 bool
 zctc::Decoder::descending_compare(zctc::Node<T>* x, zctc::Node<T>* y)
 {
-    return x->score > y->score;
+    return x->score_w_h > y->score_w_h;
 }
 
 template <typename T>
 void
 zctc::Decoder::batch_decode(py::array_t<T>& batch_log_logits, py::array_t<int>& batch_sorted_ids,
                             py::array_t<int>& batch_labels, py::array_t<int>& batch_timesteps,
-                            py::array_t<int>& batch_seq_len, const int batch_size, const int max_seq_len) const
+                            py::array_t<int>& batch_seq_len, const int batch_size, const int max_seq_len,
+                            std::vector<std::vector<int>>& hotwords, std::vector<float>& hotwords_weight) const
 {
+    ThreadPool pool(this->thread_count);
+    std::vector<std::future<int>> results;
+
+    fst::StdVectorFst hotwords_fst;
+    if (!hotwords.empty()) {
+        populate_hotword_fst(&hotwords_fst, hotwords, hotwords_weight);
+    }
 
     py::buffer_info logits_buf = batch_log_logits.request();
     py::buffer_info ids_buf = batch_sorted_ids.request();
-    py::buffer_info labels_buf = batch_labels.request();
-    py::buffer_info timesteps_buf = batch_timesteps.request();
+    py::buffer_info labels_buf = batch_labels.request(true);
+    py::buffer_info timesteps_buf = batch_timesteps.request(true);
     py::buffer_info seq_len_buf = batch_seq_len.request();
 
     if (logits_buf.ndim != 3 || ids_buf.ndim != 3 || labels_buf.ndim != 3 || timesteps_buf.ndim != 3
@@ -194,21 +202,19 @@ zctc::Decoder::batch_decode(py::array_t<T>& batch_log_logits, py::array_t<int>& 
         throw std::runtime_error("Logits must be three dimensional, like Batch x Seq-len x Vocab, "
                                  "and Sequence Length must be one dimensional, like Batch");
 
-    int* ids = (int*)ids_buf.ptr;
-    int* labels = (int*)labels_buf.ptr;
-    int* timesteps = (int*)timesteps_buf.ptr;
-    int* seq_len = (int*)seq_len_buf.ptr;
-    T* logits = (T*)logits_buf.ptr;
-
-    ThreadPool pool(this->thread_count);
-    std::vector<std::future<int>> results;
+    int* ids = static_cast<int*>(ids_buf.ptr);
+    int* labels = static_cast<int*>(labels_buf.ptr);
+    int* timesteps = static_cast<int*>(timesteps_buf.ptr);
+    int* seq_len = static_cast<int*>(seq_len_buf.ptr);
+    T* logits = static_cast<T*>(logits_buf.ptr);
 
     for (int i = 0, ip_pos = 0, op_pos = 0; i < batch_size; i++) {
         ip_pos = i * max_seq_len * this->vocab_size;
         op_pos = i * this->beam_width * max_seq_len;
 
         results.emplace_back(pool.enqueue(zctc::decode<T>, this, logits + ip_pos, ids + ip_pos, labels + op_pos,
-                                          timesteps + op_pos, *(seq_len + i)));
+                                          timesteps + op_pos, *(seq_len + i),
+                                          (hotwords.empty() ? nullptr : &hotwords_fst)));
     }
 
     for (auto&& result : results)

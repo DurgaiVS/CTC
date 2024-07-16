@@ -15,27 +15,33 @@ namespace zctc {
 template <typename T>
 class Node {
 public:
-    bool arc_exist, is_start_of_word, is_blank;
+    bool arc_exist, is_start_of_word, is_blank, is_hotpath;
+    int hotword_length;
+    T prob, max_prob, parent_scr, lm_prob, score, score_w_h, hotword_weight, penalty;
     const int id, timestep;
-    T prob, max_prob, parent_scr, lm_prob, score, penalty;
     const std::string token;
     Node<T>* parent;
     lm::ngram::State lm_state;
-    fst::StdVectorFst::StateId lexicon_state;
+    fst::StdVectorFst::StateId lexicon_state, hotword_state;
     std::vector<Node<T>*> childs;
 
     Node(int id, int timestep, bool is_blank, T prob, T penalty, const std::string token, Node<T>* parent)
         : arc_exist(false)
+        , is_start_of_word(false)
+        , is_hotpath(false)
         , is_blank(is_blank)
-        , id(id)
-        , timestep(timestep)
+        , hotword_length(0)
         , prob(prob)
         , max_prob(prob)
         , penalty(penalty)
+        , parent_scr(zctc::ZERO)
+        , lm_prob(zctc::ZERO)
+        , score(zctc::ZERO)
+        , score_w_h(zctc::ZERO)
+        , hotword_weight(zctc::ZERO)
+        , id(id)
+        , timestep(timestep)
         , token(token)
-        , parent_scr(static_cast<T>(zctc::ZERO))
-        , lm_prob(static_cast<T>(zctc::ZERO))
-        , score(static_cast<T>(zctc::ZERO))
         , parent(parent)
     {
         if (this->parent == nullptr)
@@ -46,16 +52,21 @@ public:
 
     Node(int id, int timestep, bool is_blank, T prob, T max_prob, T penalty, const std::string token, Node<T>* parent)
         : arc_exist(false)
+        , is_start_of_word(false)
+        , is_hotpath(false)
         , is_blank(is_blank)
-        , id(id)
-        , timestep(timestep)
+        , hotword_length(0)
         , prob(prob)
         , max_prob(max_prob)
         , penalty(penalty)
+        , parent_scr(zctc::ZERO)
+        , lm_prob(zctc::ZERO)
+        , score(zctc::ZERO)
+        , score_w_h(zctc::ZERO)
+        , hotword_weight(zctc::ZERO)
+        , id(id)
+        , timestep(timestep)
         , token(token)
-        , parent_scr(static_cast<T>(zctc::ZERO))
-        , lm_prob(static_cast<T>(zctc::ZERO))
-        , score(static_cast<T>(zctc::ZERO))
         , parent(parent)
     {
         if (this->parent == nullptr)
@@ -91,8 +102,10 @@ zctc::Node<T>::update_score() noexcept
 {
     this->score = this->parent_scr + this->prob + this->lm_prob;
 
-    if (!(this->arc_exist || this->is_blank))
+    if (!(this->arc_exist || this->is_blank || this->is_hotpath))
         this->score += this->penalty;
+
+    this->score_w_h = this->score + (this->hotword_length * this->hotword_weight);
 }
 
 template <typename T>

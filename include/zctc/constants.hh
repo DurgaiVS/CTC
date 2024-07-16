@@ -4,7 +4,7 @@
 namespace zctc {
 
 int ROOT_ID = -1;
-float ZERO = 0.0;
+float ZERO = 0.0f;
 
 }
 

@@ -1,13 +1,12 @@
 __all__ = ["_Decoder", "CTCDecoder"]
 
-from typing import Optional
+from typing import Optional, Union
 
 import numpy
 import torch
+from _zctc import _ZFST, _Decoder
 from omegaconf import DictConfig
 from registrable import Registrable
-
-from _zctc import _Decoder
 
 
 def get_apostrophe_id_from_vocab(vocab: list[str]) -> int:
@@ -52,12 +51,21 @@ class CTCDecoder(Registrable, _Decoder):
         )
 
     def decode(
-        self, logits: torch.Tensor, seq_lens: torch.Tensor
+        self,
+        logits: torch.Tensor,
+        seq_lens: torch.Tensor,
+        hotwords: list[list[int]] = [],
+        hotwords_weight: Union[float, list[float]] = [],
     ) -> tuple[numpy.ndarray, numpy.ndarray]:
         """
         Expecting the logits to be softmaxed and not in log scale.
         """
         batch_size, seq_len, _ = logits.shape
+        if isinstance(hotwords_weight, float):
+            hotwords_weight = [hotwords_weight] * len(hotwords)
+
+#TODO : sort hotwords in descending based on weight, and for same weight
+#sort in ascending based on token length...
 
         sorted_indices = (
             torch.argsort(logits, dim=2, descending=True)
@@ -80,6 +88,8 @@ class CTCDecoder(Registrable, _Decoder):
             seq_lens.cpu().numpy().astype(numpy.int32),
             batch_size,
             seq_len,
+            hotwords,
+            hotwords_weight,
         )
 
         return labels, timesteps
@@ -93,3 +103,8 @@ class CTCDecoder(Registrable, _Decoder):
     def from_cfg(cls, cfg: DictConfig, *args, **kwargs):
         subcls = cls.by_name(cfg.name)
         return subcls.from_cfg(cfg, *args, **kwargs)
+
+
+class ZFST(_ZFST):
+    def __init__(self, fst_path: Optional[str] = None):
+        super().__init__(fst_path)

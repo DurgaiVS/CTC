@@ -1,9 +1,10 @@
-#include "zctc/decoder.hh"
 #include <algorithm>
 #include <ctime>
 #include <iostream>
 #include <numeric>
 #include <vector>
+
+#include "zctc/decoder.hh"
 
 void
 display_help()
@@ -60,6 +61,9 @@ main(int argc, char** argv)
         } else {
             blank_id = 0;
         }
+    } else if (argc == 2 && strcmp(argv[1], "help") == 0) {
+        display_help();
+        return 0;
     } else {
         std::cout << "Enter lm path: ";
         std::cin >> lm_path;
@@ -74,9 +78,9 @@ main(int argc, char** argv)
     }
 
     char tok_sep = '#';
-    int seq_len = 250;
+    int seq_len = 1000;
     int thread_count = 1;
-    int cutoff_top_n = 25;
+    int cutoff_top_n = 40;
     float nucleus_prob_per_timestep = 1.0;
     float penalty = -5.0;
     float lm_alpha = 0.017;
@@ -96,7 +100,7 @@ main(int argc, char** argv)
     // To generate random values for logits
     std::random_device rnd_device;
     std::mt19937 mersenne_engine { rnd_device() };
-    std::uniform_real_distribution<float> dist { 0.0f, 0.01f };
+    std::uniform_real_distribution<float> dist { 0.0f, 0.03f };
     auto gen = [&dist, &mersenne_engine]() { return dist(mersenne_engine); };
 
     for (int t = 0, temp = 0; t < iter_count; t++) {
@@ -111,7 +115,8 @@ main(int argc, char** argv)
                              [&logits, &temp](int a, int b) { return logits[temp + a] > logits[temp + b]; });
         }
 
-        zctc::decode<float>(&decoder, logits.data(), sorted_indices.data(), labels.data(), timesteps.data(), seq_len);
+        zctc::decode<float>(&decoder, logits.data(), sorted_indices.data(), labels.data(), timesteps.data(), seq_len,
+                            nullptr);
 
         std::fill(labels.begin(), labels.end(), 0);
         std::fill(timesteps.begin(), timesteps.end(), 0);

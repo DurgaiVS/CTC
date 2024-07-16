@@ -43,13 +43,15 @@ public:
     }
 
     template <typename T>
-    inline void start_of_word_check(Node<T>* prefix) const;
+    inline void start_of_word_check(Node<T>* prefix, fst::StdVectorFst* hotwords_fst) const;
 
     template <typename T>
-    inline void initialise_start_states(Node<T>* root) const;
+    inline void initialise_start_states(Node<T>* root, fst::StdVectorFst* hotwords_fst) const;
 
     template <typename T>
-    void run_ext_scoring(zctc::Node<T>* prefix, fst::SortedMatcher<fst::StdVectorFst>* matcher) const;
+    void run_ext_scoring(zctc::Node<T>* prefix, fst::SortedMatcher<fst::StdVectorFst>* lexicon_matcher,
+                         fst::StdVectorFst* hotwords_fst,
+                         fst::SortedMatcher<fst::StdVectorFst>* hotwords_matcher) const;
 };
 
 } // namespace zctc
@@ -58,29 +60,37 @@ public:
 
 template <typename T>
 void
-zctc::ExternalScorer::start_of_word_check(Node<T>* prefix) const
+zctc::ExternalScorer::start_of_word_check(Node<T>* prefix, fst::StdVectorFst* hotwords_fst) const
 {
     prefix->is_start_of_word = !(prefix->id == this->apostrophe_id || prefix->parent->id == this->apostrophe_id
                                  || prefix->token.at(0) == this->tok_sep);
 
     if (prefix->is_start_of_word)
         prefix->lexicon_state = this->lexicon->Start();
+
+    if (hotwords_fst)
+        prefix->hotword_state = hotwords_fst->Start();
 }
 
 template <typename T>
 void
-zctc::ExternalScorer::initialise_start_states(Node<T>* root) const
+zctc::ExternalScorer::initialise_start_states(Node<T>* root, fst::StdVectorFst* hotwords_fst) const
 {
     if (this->lexicon)
         root->lexicon_state = this->lexicon->Start();
 
     if (this->lm)
         this->lm->BeginSentenceWrite(&(root->lm_state));
+
+    if (hotwords_fst)
+        root->hotword_state = hotwords_fst->Start();
 }
 
 template <typename T>
 void
-zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* prefix, fst::SortedMatcher<fst::StdVectorFst>* matcher) const
+zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* prefix, fst::SortedMatcher<fst::StdVectorFst>* lexicon_matcher,
+                                      fst::StdVectorFst* hotwords_fst,
+                                      fst::SortedMatcher<fst::StdVectorFst>* hotwords_matcher) const
 {
 
     if (this->lm) {
@@ -95,9 +105,9 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* prefix, fst::SortedMatcher<
         }
     }
 
-    if (this->lexicon) {
+    this->start_of_word_check(prefix, hotwords_fst);
 
-        this->start_of_word_check(prefix);
+    if (this->lexicon) {
 
         if (!(prefix->parent->arc_exist || prefix->is_start_of_word)) {
 
@@ -107,16 +117,30 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* prefix, fst::SortedMatcher<
 
             fst::StdVectorFst::StateId state
                 = prefix->is_start_of_word ? prefix->lexicon_state : prefix->parent->lexicon_state;
-            matcher->SetState(state);
+            lexicon_matcher->SetState(state);
 
-            if (matcher->Find(prefix->id)) {
-                prefix->lexicon_state = matcher->Value().nextstate;
+            if (lexicon_matcher->Find(prefix->id)) {
+                prefix->lexicon_state = lexicon_matcher->Value().nextstate;
                 prefix->arc_exist = true;
             }
         }
 
     } else {
         prefix->arc_exist = true;
+    }
+
+    if (hotwords_fst && (prefix->parent->is_hotpath || prefix->is_start_of_word)) {
+
+        fst::StdVectorFst::StateId state
+            = prefix->is_start_of_word ? prefix->hotword_state : prefix->parent->hotword_state;
+        hotwords_matcher->SetState(state);
+
+        if (hotwords_matcher->Find(prefix->id)) {
+            const fst::StdArc& arc = hotwords_matcher->Value();
+            prefix->hotword_length = arc.olabel;
+            prefix->hotword_weight = arc.weight.Value();
+            prefix->is_hotpath = true;
+        }
     }
 }
 
