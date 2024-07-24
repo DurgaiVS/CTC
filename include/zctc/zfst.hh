@@ -42,19 +42,15 @@ public:
 
     ~ZFST() { delete fst; }
 
-    void optimize();
-    int parse_lexicon_file(std::string file_path, int freq_threshold, std::unordered_map<std::string, int>& char_map,
-                           int worker_count);
+    void insert_into_fst(fst::SortedMatcher<fst::StdVectorFst>* matcher, std::vector<std::vector<int>>& tokens_group);
     int parse_lexicon_files(std::vector<std::string>& file_paths, int freq_threshold,
                             std::unordered_map<std::string, int>& char_map, int worker_count);
-    void insert_into_fst(fst::SortedMatcher<fst::StdVectorFst>* matcher, std::vector<int>& tokens);
-    void insert_into_fst(fst::SortedMatcher<fst::StdVectorFst>* matcher, std::vector<std::vector<int>>& tokens_group);
-    bool write(std::string output_path);
 
-protected:
-    fst::StdVectorFst::StateId insert_path(fst::StdVectorFst::StateId state, int value);
-    fst::StdVectorFst::StateId is_path_available(fst::SortedMatcher<fst::StdVectorFst>* matcher,
-                                                 fst::StdVectorFst::StateId state, int value);
+    inline void insert_into_fst(fst::SortedMatcher<fst::StdVectorFst>* matcher, std::vector<int>& tokens);
+    inline void optimize();
+    inline int parse_lexicon_file(std::string file_path, int freq_threshold,
+                                  std::unordered_map<std::string, int>& char_map);
+    inline bool write(std::string output_path);
 };
 
 int
@@ -71,7 +67,7 @@ populate_hotword_fst(fst::StdVectorFst* fst, std::vector<std::vector<int>>& hotw
 
 int
 zctc::ZFST::parse_lexicon_file(std::string file_path, int freq_threshold,
-                               std::unordered_map<std::string, int>& char_map, int worker_count)
+                               std::unordered_map<std::string, int>& char_map)
 {
     return zctc::parse_lexicon_file(this, file_path, freq_threshold, char_map);
 }
@@ -96,6 +92,8 @@ zctc::ZFST::parse_lexicon_files(std::vector<std::string>& file_paths, int freq_t
 bool
 zctc::ZFST::write(std::string output_path)
 {
+    std::lock_guard<std::mutex> guard(this->mutex);
+
     return this->fst->Write(output_path);
 }
 
@@ -120,40 +118,24 @@ zctc::ZFST::optimize()
     fst::Minimize(this->fst);
 }
 
-fst::StdVectorFst::StateId
-zctc::ZFST::is_path_available(fst::SortedMatcher<fst::StdVectorFst>* matcher, fst::StdVectorFst::StateId state,
-                              int value)
-{
-    std::lock_guard<std::mutex> guard(this->mutex);
-
-    matcher->SetState(state);
-    if (matcher->Find(value))
-        return matcher->Value().nextstate;
-    else
-        return this->fst->Start();
-}
-
-fst::StdVectorFst::StateId
-zctc::ZFST::insert_path(fst::StdVectorFst::StateId state, int value)
-{
-    std::lock_guard<std::mutex> guard(this->mutex);
-
-    fst::StdVectorFst::StateId next_state = this->fst->AddState();
-    this->fst->AddArc(state, fst::StdArc(value, value, 0, next_state));
-    return next_state;
-}
-
 void
 zctc::ZFST::insert_into_fst(fst::SortedMatcher<fst::StdVectorFst>* matcher, std::vector<int>& tokens)
 {
     fst::StdVectorFst::StateId next_state, state = this->fst->Start();
 
     for (int token : tokens) {
-        next_state = this->is_path_available(matcher, state, token);
-        if (next_state == this->fst->Start())
-            state = this->insert_path(state, token);
-        else
+        std::lock_guard<std::mutex> guard(this->mutex);
+
+        matcher->SetState(state);
+        if (matcher->Find(token)) {
+            state = matcher->Value().nextstate;
+            continue;
+
+        } else {
+            next_state = this->fst->AddState();
+            this->fst->AddArc(state, fst::StdArc(token, token, 0, next_state));
             state = next_state;
+        }
     }
 }
 
@@ -165,11 +147,18 @@ zctc::ZFST::insert_into_fst(fst::SortedMatcher<fst::StdVectorFst>* matcher, std:
         state = this->fst->Start();
 
         for (int token : tokens) {
-            next_state = this->is_path_available(matcher, state, token);
-            if (next_state == this->fst->Start())
-                state = this->insert_path(state, token);
-            else
+            std::lock_guard<std::mutex> guard(this->mutex);
+
+            matcher->SetState(state);
+            if (matcher->Find(token)) {
+                state = matcher->Value().nextstate;
+                continue;
+
+            } else {
+                next_state = this->fst->AddState();
+                this->fst->AddArc(state, fst::StdArc(token, token, 0, next_state));
                 state = next_state;
+            }
         }
     }
 }
@@ -206,6 +195,7 @@ zctc::parse_lexicon_file(zctc::ZFST* zfst, std::string file_path, int freq_thres
         }
 
         zfst->insert_into_fst(&matcher, tokens);
+        tokens.clear();
     }
 
     return 0;

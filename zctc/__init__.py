@@ -1,4 +1,4 @@
-__all__ = ["_Decoder", "CTCDecoder"]
+__all__ = ["CTCDecoder", "ZFST"]
 
 from typing import Optional, Union
 

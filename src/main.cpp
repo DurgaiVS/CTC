@@ -6,20 +6,6 @@
 
 #include "zctc/decoder.hh"
 
-void
-display_help()
-{
-
-    std::cout << "Usage:" << std::endl;
-    std::cout << "\t./zctc lm_path lexicon_path vocab_path iter_count blank_id" << std::endl;
-
-    std::cout << "lm_path - Language Model (KenLM built) file path " << std::endl;
-    std::cout << "lexicon_path - Lexicon fst file path " << std::endl;
-    std::cout << "vocab_path - Vocabulary file path " << std::endl;
-    std::cout << "iter_count - Number of iterations to run the decoder for with randomly generated logits" << std::endl;
-    std::cout << "blank_id [optional] - Blank token ID. Default: 0" << std::endl;
-}
-
 int
 load_vocab(std::vector<std::string>& vocab, const char* vocab_path)
 {
@@ -42,60 +28,58 @@ load_vocab(std::vector<std::string>& vocab, const char* vocab_path)
 }
 
 int
-main(int argc, char** argv)
+load_vocab(std::unordered_map<std::string, int>& char_map, const char* vocab_path)
 {
-    std::string lm_path;
-    std::string lexicon_path;
-    std::string vocab_path;
-    int iter_count;
-    int blank_id;
+    std::ifstream inputFile(vocab_path);
+    int id = 0;
 
-    if (argc == 5 || argc == 6) {
-        lm_path = argv[1];
-        lexicon_path = argv[2];
-        vocab_path = argv[3];
-        iter_count = std::stoi(argv[4]);
+    if (!inputFile.is_open())
+        std::runtime_error("Cannot open vocab file from the path provided.");
 
-        if (argc == 6) {
-            blank_id = std::stoi(argv[5]);
-        } else {
-            blank_id = 0;
-        }
-    } else if (argc == 2 && strcmp(argv[1], "help") == 0) {
-        display_help();
-        return 0;
-    } else {
-        std::cout << "Enter lm path: ";
-        std::cin >> lm_path;
-        std::cout << "Enter lexicon path: ";
-        std::cin >> lexicon_path;
-        std::cout << "Enter vocab path: ";
-        std::cin >> vocab_path;
-        std::cout << "Enter number of iterations to run: ";
-        std::cin >> iter_count;
-        std::cout << "Enter blank id: ";
-        std::cin >> blank_id;
+    std::string line;
+    while (std::getline(inputFile, line)) {
+        char_map[line] = id++;
     }
 
-    char tok_sep = '#';
-    int seq_len = 1000;
-    int thread_count = 1;
-    int cutoff_top_n = 40;
-    float nucleus_prob_per_timestep = 1.0;
-    float penalty = -5.0;
-    float lm_alpha = 0.017;
+    return 0;
+}
 
+int
+debug_decoder()
+{
+
+    char tok_sep = '#';
+    int iter_count, blank_id, seq_len = 1000, thread_count = 1, cutoff_top_n = 40;
+    float nucleus_prob_per_timestep = 1.0, penalty = -5.0, lm_alpha = 0.017;
     std::size_t beam_width = 250;
+    std::string lm_path, lexicon_path, vocab_path;
     std::vector<std::string> vocab;
+
+    std::cout << "Enter lm path: ";
+    std::cin >> lm_path;
+    std::cout << "Enter lexicon path: ";
+    std::cin >> lexicon_path;
+    std::cout << "Enter vocab path: ";
+    std::cin >> vocab_path;
+    std::cout << "Enter number of iterations to run: ";
+    std::cin >> iter_count;
+    std::cout << "Enter blank id: ";
+    std::cin >> blank_id;
+
     int apostrophe_id = load_vocab(vocab, vocab_path.c_str());
 
     zctc::Decoder decoder(thread_count, blank_id, cutoff_top_n, apostrophe_id, nucleus_prob_per_timestep, lm_alpha,
-                          beam_width, penalty, tok_sep, vocab, lm_path.c_str(), lexicon_path.c_str());
+                          beam_width, penalty, tok_sep, vocab, lm_path.data(), lexicon_path.data());
 
     std::vector<float> logits(decoder.vocab_size * seq_len);
     std::vector<int> sorted_indices(decoder.vocab_size * seq_len);
     std::vector<int> labels(decoder.beam_width * seq_len, 0);
     std::vector<int> timesteps(decoder.beam_width * seq_len, 0);
+
+    fst::StdVectorFst hotwords_fst;
+    std::vector<std::vector<int>> hotwords({ { 1, 2, 3, 4, 5 } });
+    std::vector<float> hotwords_weight(5.0);
+    zctc::populate_hotword_fst(&hotwords_fst, hotwords, hotwords_weight);
 
     // To generate random values for logits
     std::random_device rnd_device;
@@ -123,4 +107,34 @@ main(int argc, char** argv)
     }
 
     return 0;
+}
+
+int
+debug_fst()
+{
+    std::string vocab_path, file_path;
+    std::unordered_map<std::string, int> char_map;
+    zctc::ZFST zfst((char*)nullptr);
+
+    std::cout << "Enter vocab path: ";
+    std::cin >> vocab_path;
+    std::cout << "Enter tokenized lexicon path: ";
+    std::cin >> file_path;
+
+    load_vocab(char_map, vocab_path.c_str());
+    zctc::parse_lexicon_file(&zfst, file_path, 0, char_map);
+
+    return 0;
+}
+
+int
+main(int argc, char** argv)
+{
+    int choice;
+    std::cout << "Enter choice(0 for Decoder, 1 for FST): ";
+    std::cin >> choice;
+    if (choice == 0)
+        return debug_decoder();
+    else
+        return debug_fst();
 }

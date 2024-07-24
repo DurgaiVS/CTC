@@ -30,7 +30,7 @@ PYBIND11_MODULE(_zctc, m)
         .def("parse_lexicon_files", &zctc::ZFST::parse_lexicon_files, py::arg("file_paths"), py::arg("freq_threshold"),
              py::arg("char_map"), py::arg("worker_count"), py::call_guard<py::gil_scoped_release>())
         .def("parse_lexicon_file", &zctc::ZFST::parse_lexicon_file, py::arg("file_path"), py::arg("freq_threshold"),
-             py::arg("char_map"), py::arg("worker_count"), py::call_guard<py::gil_scoped_release>())
+             py::arg("char_map"), py::call_guard<py::gil_scoped_release>())
         .def("optimize", &zctc::ZFST::optimize)
         .def("write", &zctc::ZFST::write, py::arg("output_path"));
 }
