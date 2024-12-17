@@ -7,3 +7,5 @@ dist/
 *tar.gz
 *log
 *.so
+openfst*/
+pts/

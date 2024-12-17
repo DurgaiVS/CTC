@@ -1,7 +1,6 @@
 #ifndef _ZCTC_TRIE_H
 #define _ZCTC_TRIE_H
 
-#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -20,6 +19,7 @@ public:
     T prob, max_prob, parent_scr, lm_prob, score, score_w_h, hotword_weight, penalty;
     const int id, timestep;
     const std::string token;
+    std::string decoded_path;
     Node<T>* parent;
     lm::ngram::State lm_state;
     fst::StdVectorFst::StateId lexicon_state, hotword_state;
@@ -44,13 +44,17 @@ public:
         , token(token)
         , parent(parent)
     {
-        if (this->parent == nullptr)
+        if (this->parent == nullptr) {
+            this->decoded_path = token;
             return;
+        }
 
+        this->decoded_path = (is_blank ? parent->decoded_path : parent->decoded_path + token);
         this->parent_scr = parent->score;
     }
 
-    Node(int id, int timestep, bool is_blank, T prob, T max_prob, T penalty, const std::string token, Node<T>* parent)
+    Node(int id, int timestep, bool is_blank, T prob, T max_prob, T penalty, const std::string token,
+         std::string decoded_path, Node<T>* parent)
         : arc_exist(false)
         , is_start_of_word(false)
         , is_hotpath(false)
@@ -67,10 +71,12 @@ public:
         , id(id)
         , timestep(timestep)
         , token(token)
+        , decoded_path(decoded_path)
         , parent(parent)
     {
-        if (this->parent == nullptr)
+        if (this->parent == nullptr) {
             return;
+        }
 
         this->parent_scr = parent->score;
     }
@@ -119,11 +125,12 @@ zctc::Node<T>::add_to_child(int id, int timestep, T prob, const std::string toke
         // checking whether the new repeat is more confident than previous ones.
         if (prob > this->max_prob) {
             // if it is, then changing the confidence threshold, accumulating the probs, and updating the timestep.
-            child = new Node<T>(id, timestep, is_blank, this->prob + prob, prob, this->penalty, token, this->parent);
+            child = new Node<T>(id, timestep, is_blank, this->prob + prob, prob, this->penalty, token,
+                                this->decoded_path, this->parent);
         } else {
             // if not, just accumulating the probs
             child = new Node<T>(this->id, this->timestep, is_blank, this->prob + prob, this->max_prob, this->penalty,
-                                token, this->parent);
+                                token, this->decoded_path, this->parent);
         }
         this->parent->childs.push_back(child);
         *is_repeat = true;

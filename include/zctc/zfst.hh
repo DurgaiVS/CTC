@@ -21,8 +21,9 @@ class ZFST {
 public:
     fst::StdVectorFst* fst;
     std::mutex mutex;
+    std::unordered_map<std::string, int> char_map;
 
-    ZFST(char* fst_path)
+    ZFST(char* vocab_path, char* fst_path)
         : fst(nullptr)
     {
         if (fst_path) {
@@ -33,29 +34,32 @@ public:
             this->fst = new fst::StdVectorFst;
             init_fst(this->fst);
         }
+
+        this->load_vocab(vocab_path);
     }
 
-    explicit ZFST(fst::StdVectorFst* fst)
+    explicit ZFST(char* vocab_path, fst::StdVectorFst* fst)
         : fst(fst)
     {
+        this->load_vocab(vocab_path);
     }
 
     ~ZFST() { delete fst; }
 
     void insert_into_fst(fst::SortedMatcher<fst::StdVectorFst>* matcher, std::vector<std::vector<int>>& tokens_group);
-    int parse_lexicon_files(std::vector<std::string>& file_paths, int freq_threshold,
-                            std::unordered_map<std::string, int>& char_map, int worker_count);
+    void optimize();
+    int parse_lexicon_files(std::vector<std::string>& file_paths, int freq_threshold, int worker_count);
+    int parse_lexicon_file(std::string file_path, int freq_threshold);
+    bool write(std::string output_path);
 
     inline void insert_into_fst(fst::SortedMatcher<fst::StdVectorFst>* matcher, std::vector<int>& tokens);
-    inline void optimize();
-    inline int parse_lexicon_file(std::string file_path, int freq_threshold,
-                                  std::unordered_map<std::string, int>& char_map);
-    inline bool write(std::string output_path);
+
+protected:
+    inline void load_vocab(char* vocab_path);
 };
 
 int
-parse_lexicon_file(ZFST* zfst, std::string file_path, int freq_threshold,
-                   std::unordered_map<std::string, int>& char_map);
+parse_lexicon_file(ZFST* zfst, std::string file_path, int freq_threshold);
 // NOTE: hotwords_weight should be sorted in descending order...
 void
 populate_hotword_fst(fst::StdVectorFst* fst, std::vector<std::vector<int>>& hotwords,
@@ -66,21 +70,19 @@ populate_hotword_fst(fst::StdVectorFst* fst, std::vector<std::vector<int>>& hotw
 /* ---------------------------------------------------------------------------- */
 
 int
-zctc::ZFST::parse_lexicon_file(std::string file_path, int freq_threshold,
-                               std::unordered_map<std::string, int>& char_map)
+zctc::ZFST::parse_lexicon_file(std::string file_path, int freq_threshold)
 {
-    return zctc::parse_lexicon_file(this, file_path, freq_threshold, char_map);
+    return zctc::parse_lexicon_file(this, file_path, freq_threshold);
 }
 
 int
-zctc::ZFST::parse_lexicon_files(std::vector<std::string>& file_paths, int freq_threshold,
-                                std::unordered_map<std::string, int>& char_map, int worker_count)
+zctc::ZFST::parse_lexicon_files(std::vector<std::string>& file_paths, int freq_threshold, int worker_count)
 {
     ThreadPool pool(worker_count);
     std::vector<std::future<int>> results;
 
     for (std::string file_path : file_paths)
-        results.emplace_back(pool.enqueue(zctc::parse_lexicon_file, this, file_path, freq_threshold, char_map));
+        results.emplace_back(pool.enqueue(zctc::parse_lexicon_file, this, file_path, freq_threshold));
 
     for (auto&& result : results)
         if (result.get() != 0)
@@ -137,6 +139,9 @@ zctc::ZFST::insert_into_fst(fst::SortedMatcher<fst::StdVectorFst>* matcher, std:
             state = next_state;
         }
     }
+
+    std::lock_guard<std::mutex> guard(this->mutex);
+    this->fst->SetFinal(state, 0);
 }
 
 void
@@ -160,12 +165,14 @@ zctc::ZFST::insert_into_fst(fst::SortedMatcher<fst::StdVectorFst>* matcher, std:
                 state = next_state;
             }
         }
+
+        std::lock_guard<std::mutex> guard(this->mutex);
+        this->fst->SetFinal(state, 0);
     }
 }
 
 int
-zctc::parse_lexicon_file(zctc::ZFST* zfst, std::string file_path, int freq_threshold,
-                         std::unordered_map<std::string, int>& char_map)
+zctc::parse_lexicon_file(zctc::ZFST* zfst, std::string file_path, int freq_threshold)
 {
     int freq;
     std::string word, tmp, line;
@@ -191,7 +198,7 @@ zctc::parse_lexicon_file(zctc::ZFST* zfst, std::string file_path, int freq_thres
 
         while (iss.good()) {
             iss >> tmp;
-            tokens.push_back(char_map[tmp]);
+            tokens.push_back(zfst->char_map[tmp]);
         }
 
         zfst->insert_into_fst(&matcher, tokens);
@@ -233,6 +240,21 @@ zctc::populate_hotword_fst(fst::StdVectorFst* fst, std::vector<std::vector<int>>
             }
         }
     }
+}
+
+void
+zctc::ZFST::load_vocab(char* vocab_path)
+{
+
+    int id = 0;
+    std::string line;
+    std::ifstream inputFile(vocab_path);
+
+    if (!inputFile.is_open())
+        std::runtime_error("Cannot open vocab file from the path provided.");
+
+    while (std::getline(inputFile, line))
+        this->char_map[line] = id++;
 }
 
 #endif // _ZCTC_ZFST_H

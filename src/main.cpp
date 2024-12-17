@@ -1,8 +1,6 @@
-#include <algorithm>
 #include <ctime>
 #include <iostream>
 #include <numeric>
-#include <vector>
 
 #include "zctc/decoder.hh"
 
@@ -25,23 +23,6 @@ load_vocab(std::vector<std::string>& vocab, const char* vocab_path)
     }
 
     return apostrophe_id;
-}
-
-int
-load_vocab(std::unordered_map<std::string, int>& char_map, const char* vocab_path)
-{
-    std::ifstream inputFile(vocab_path);
-    int id = 0;
-
-    if (!inputFile.is_open())
-        std::runtime_error("Cannot open vocab file from the path provided.");
-
-    std::string line;
-    while (std::getline(inputFile, line)) {
-        char_map[line] = id++;
-    }
-
-    return 0;
 }
 
 int
@@ -75,6 +56,7 @@ debug_decoder()
     std::vector<int> sorted_indices(decoder.vocab_size * seq_len);
     std::vector<int> labels(decoder.beam_width * seq_len, 0);
     std::vector<int> timesteps(decoder.beam_width * seq_len, 0);
+    std::vector<int> seq_pos(decoder.beam_width, 0);
 
     fst::StdVectorFst hotwords_fst;
     std::vector<std::vector<int>> hotwords({ { 1, 2, 3, 4, 5 } });
@@ -100,10 +82,11 @@ debug_decoder()
         }
 
         zctc::decode<float>(&decoder, logits.data(), sorted_indices.data(), labels.data(), timesteps.data(), seq_len,
-                            nullptr);
+                            seq_pos.data(), &hotwords_fst);
 
         std::fill(labels.begin(), labels.end(), 0);
         std::fill(timesteps.begin(), timesteps.end(), 0);
+        std::fill(seq_pos.begin(), seq_pos.end(), 0);
     }
 
     return 0;
@@ -113,16 +96,14 @@ int
 debug_fst()
 {
     std::string vocab_path, file_path;
-    std::unordered_map<std::string, int> char_map;
-    zctc::ZFST zfst((char*)nullptr);
 
     std::cout << "Enter vocab path: ";
     std::cin >> vocab_path;
     std::cout << "Enter tokenized lexicon path: ";
     std::cin >> file_path;
 
-    load_vocab(char_map, vocab_path.c_str());
-    zctc::parse_lexicon_file(&zfst, file_path, 0, char_map);
+    zctc::ZFST zfst(vocab_path.data(), (char*)nullptr);
+    zctc::parse_lexicon_file(&zfst, file_path, 0);
 
     return 0;
 }

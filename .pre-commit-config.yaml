@@ -21,14 +21,14 @@ repos:
         entry: black
         language: python
         types: [python]
-      - id: clang-format
-        name: clang-format
-        entry: clang-format
-        language: python
-        args:
-          - -i
-          - "**/**/*hh"
-          - "**/*cpp"
+      # - id: clang-format
+      #   name: clang-format
+      #   entry: clang-format
+      #   language: python
+      #   args:
+      #     - -i
+      #     - "**/**/*hh"
+      #     - "**/*cpp"
       - id: pylint
         name: pylint
         entry: pylint

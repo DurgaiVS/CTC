@@ -1,7 +1,9 @@
 #ifndef _ZCTC_DECODER_H
 #define _ZCTC_DECODER_H
 
+#include <algorithm>
 #include <cmath>
+#include <unordered_map>
 
 #include <ThreadPool.h>
 #include <pybind11/numpy.h>
@@ -45,26 +47,32 @@ public:
     template <typename T>
     void batch_decode(py::array_t<T>& batch_log_logits, py::array_t<int>& batch_sorted_ids,
                       py::array_t<int>& batch_labels, py::array_t<int>& batch_timesteps,
-                      py::array_t<int>& batch_seq_len, const int batch_size, const int max_seq_len,
-                      std::vector<std::vector<int>>& hotwords, std::vector<float>& hotwords_weight) const;
+                      py::array_t<int>& batch_seq_len, py::array_t<int>& batch_seq_pos, const int batch_size,
+                      const int max_seq_len, std::vector<std::vector<int>>& hotwords,
+                      std::vector<float>& hotwords_weight) const;
 };
 
 template <typename T>
 int
-decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, const int seq_len,
+decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, const int seq_len, int* seq_pos,
        fst::StdVectorFst* hotwords_fst)
 {
 
     bool is_repeat, is_blank;
-    int iter_val;
+    int iter_val, pos_val;
     T nucleus_max, nucleus_count, prob;
-    int *curr_id, *curr_l, *curr_t;
+    int *curr_id, *curr_l, *curr_t, *curr_p;
     zctc::Node<T>* child;
     std::vector<zctc::Node<T>*> prefixes0, prefixes1;
+    std::unordered_map<std::string, T> decodedpath_weight;
     zctc::Node<T> root(zctc::ROOT_ID, -1, true, static_cast<T>(zctc::ZERO), static_cast<T>(decoder->penalty), "<s>",
                        nullptr);
     fst::SortedMatcher<fst::StdVectorFst> lexicon_matcher(decoder->ext_scorer.lexicon, fst::MATCH_INPUT);
     fst::SortedMatcher<fst::StdVectorFst> hotwords_matcher(hotwords_fst, fst::MATCH_INPUT);
+
+    auto comparator = [&decodedpath_weight](zctc::Node<T>* x, zctc::Node<T>* y) -> bool {
+        return decodedpath_weight[x->decoded_path] > decodedpath_weight[y->decoded_path];
+    };
 
     nucleus_max = static_cast<T>(decoder->nucleus_prob_per_timestep);
     decoder->ext_scorer.initialise_start_states(&root, hotwords_fst);
@@ -86,8 +94,7 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
             prob = logits[iter_val + index];
 
             is_blank = index == decoder->blank_id;
-            nucleus_count += prob;
-            prob = std::log(prob);
+            nucleus_count += std::exp(prob);
 
             for (zctc::Node<T>* prefix : reader) {
 
@@ -121,6 +128,13 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
                 // update total score for the node,
                 // considering probs, LM probs, OOV penalty.
                 child->update_score();
+                if (decodedpath_weight.find(child->decoded_path) == decodedpath_weight.end()) {
+                    // if the decoded path is not present in the map, add it.
+                    decodedpath_weight[child->decoded_path] = std::exp(child->score_w_h);
+                } else {
+                    // if the decoded path is present in the map, accumulate the probs.
+                    decodedpath_weight[child->decoded_path] += std::exp(child->score_w_h);
+                }
             }
 
             if (nucleus_count >= nucleus_max)
@@ -132,19 +146,24 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
         if (writer.size() < decoder->beam_width)
             continue;
 
-        std::nth_element(writer.begin(), writer.begin() + decoder->beam_width, writer.end(),
-                         Decoder::descending_compare<T>);
+        for (auto& dec_path : decodedpath_weight) {
+            decodedpath_weight[dec_path.first] = std::log(dec_path.second);
+        }
+        std::nth_element(writer.begin(), writer.begin() + decoder->beam_width, writer.end(), comparator);
         writer.erase(writer.begin() + decoder->beam_width, writer.end());
+        decodedpath_weight.clear();
     }
 
     std::vector<zctc::Node<T>*>& reader = ((seq_len % 2) == 0 ? prefixes0 : prefixes1);
-    std::stable_sort(reader.begin(), reader.end(), Decoder::descending_compare<T>);
+    std::stable_sort(reader.begin(), reader.end(), comparator);
 
     iter_val = 1;
+    curr_p = seq_pos;
     for (zctc::Node<T>* prefix : reader) {
 
         curr_t = timestep + ((seq_len * iter_val) - 1);
         curr_l = label + ((seq_len * iter_val) - 1);
+        pos_val = seq_len;
 
         while (prefix->id != zctc::ROOT_ID) {
 
@@ -154,11 +173,14 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
             // if index becomes less than 0, might throw error
             curr_l--;
             curr_t--;
+            pos_val--;
 
             prefix = prefix->parent;
         }
 
+        *curr_p = pos_val;
         iter_val++;
+        curr_p++;
     }
 
     return 0;
@@ -179,8 +201,9 @@ template <typename T>
 void
 zctc::Decoder::batch_decode(py::array_t<T>& batch_log_logits, py::array_t<int>& batch_sorted_ids,
                             py::array_t<int>& batch_labels, py::array_t<int>& batch_timesteps,
-                            py::array_t<int>& batch_seq_len, const int batch_size, const int max_seq_len,
-                            std::vector<std::vector<int>>& hotwords, std::vector<float>& hotwords_weight) const
+                            py::array_t<int>& batch_seq_len, py::array_t<int>& batch_seq_pos, const int batch_size,
+                            const int max_seq_len, std::vector<std::vector<int>>& hotwords,
+                            std::vector<float>& hotwords_weight) const
 {
     ThreadPool pool(this->thread_count);
     std::vector<std::future<int>> results;
@@ -195,24 +218,28 @@ zctc::Decoder::batch_decode(py::array_t<T>& batch_log_logits, py::array_t<int>& 
     py::buffer_info labels_buf = batch_labels.request(true);
     py::buffer_info timesteps_buf = batch_timesteps.request(true);
     py::buffer_info seq_len_buf = batch_seq_len.request();
+    py::buffer_info seq_pos_buf = batch_seq_pos.request(true);
 
     if (logits_buf.ndim != 3 || ids_buf.ndim != 3 || labels_buf.ndim != 3 || timesteps_buf.ndim != 3
-        || seq_len_buf.ndim != 1)
+        || seq_len_buf.ndim != 1 || seq_pos_buf.ndim != 2)
         throw std::runtime_error("Logits must be three dimensional, like Batch x Seq-len x Vocab, "
-                                 "and Sequence Length must be one dimensional, like Batch");
+                                 "and Sequence Length must be one dimensional, like Batch, "
+                                 "and Sequence Pos mus be two dimensional, like Batch x BeamWidth");
 
+    T* logits = static_cast<T*>(logits_buf.ptr);
     int* ids = static_cast<int*>(ids_buf.ptr);
     int* labels = static_cast<int*>(labels_buf.ptr);
     int* timesteps = static_cast<int*>(timesteps_buf.ptr);
     int* seq_len = static_cast<int*>(seq_len_buf.ptr);
-    T* logits = static_cast<T*>(logits_buf.ptr);
+    int* seq_pos = static_cast<int*>(seq_pos_buf.ptr);
 
-    for (int i = 0, ip_pos = 0, op_pos = 0; i < batch_size; i++) {
+    for (int i = 0, ip_pos = 0, op_pos = 0, s_p = 0; i < batch_size; i++) {
         ip_pos = i * max_seq_len * this->vocab_size;
-        op_pos = i * this->beam_width * max_seq_len;
+        s_p = i * this->beam_width;
+        op_pos = s_p * max_seq_len;
 
         results.emplace_back(pool.enqueue(zctc::decode<T>, this, logits + ip_pos, ids + ip_pos, labels + op_pos,
-                                          timesteps + op_pos, *(seq_len + i),
+                                          timesteps + op_pos, *(seq_len + i), seq_pos + s_p,
                                           (hotwords.empty() ? nullptr : &hotwords_fst)));
     }
 

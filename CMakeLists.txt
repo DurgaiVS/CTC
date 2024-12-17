@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.5)
 
 project(ZCTC)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(BUILD_SHARED_LIBS ON)
 
 if(NOT DEFINED PYTHON_EXECUTABLE OR NOT DEFINED CMAKE_INSTALL_PREFIX OR NOT DEFINED PYTHON_INCLUDE_DIR OR NOT DEFINED FST_DIR)
@@ -58,10 +58,8 @@ if(TARGET lzma)
     target_link_libraries(_zctc PUBLIC lzma)
 endif()
 
-install(TARGETS _zctc LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
-set_target_properties(_zctc kenlm_filter kenlm_builder kenlm_util kenlm PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${LIBRARY_OUTPUT_DIRECTORY})
-
 if(${CMAKE_BUILD_TYPE} STREQUAL Debug)
+
     add_executable(zctc ${CMAKE_SOURCE_DIR}/src/main.cpp ${FST_SOURCES})
     target_link_libraries(zctc PUBLIC ${PYTHON_LIBRARIES} kenlm_filter kenlm_builder kenlm_util kenlm pthread dl util)
     if(TARGET z)
@@ -74,6 +72,11 @@ if(${CMAKE_BUILD_TYPE} STREQUAL Debug)
         target_link_libraries(zctc PUBLIC lzma)
     endif()
 
-    install(TARGETS zctc RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
-    set_target_properties(zctc PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${LIBRARY_OUTPUT_DIRECTORY})
+    # install(TARGETS zctc RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
+    # set_target_properties(zctc PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${LIBRARY_OUTPUT_DIRECTORY})
+else()
+
+    install(TARGETS _zctc LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
+    set_target_properties(_zctc kenlm_filter kenlm_builder kenlm_util kenlm PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${LIBRARY_OUTPUT_DIRECTORY})
+
 endif()
