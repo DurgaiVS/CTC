@@ -4,7 +4,7 @@
 #include "fst/fstlib.h"
 #include "lm/model.hh"
 
-#include "./trie.hh"
+#include "./node.hh"
 
 namespace zctc {
 
@@ -134,8 +134,6 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* node, fst::SortedMatcher<fs
             }
         }
 
-    } else {
-        node->is_lex_path = true;
     }
 
     if (hotwords_fst && (node->parent->is_hotpath || node->is_start_of_word)) {

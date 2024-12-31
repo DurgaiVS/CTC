@@ -27,7 +27,7 @@ public:
     std::vector<Node<T>*> childs;
 
     Node(int id, int ts, T prob, const std::string token, Node<T>* parent)
-        : is_lex_path(false)
+        : is_lex_path(true)
         , is_start_of_word(false)
         , is_hotpath(false)
         , hotword_length(0)
@@ -82,7 +82,7 @@ template <typename T>
 void
 zctc::Node<T>::update_score(float penalty) noexcept
 {
-    if (this->_tk_prob > this->max_prob) {
+    if ((this->tk_ts != this->ts) && (this->_tk_prob > this->max_prob)) {
         this->max_prob = this->_tk_prob;
         this->ts = this->tk_ts;
     }

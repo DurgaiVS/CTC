@@ -9,7 +9,7 @@
 #include <pybind11/stl.h>
 
 #include "./ext_scorer.hh"
-#include "./trie.hh"
+#include "./node.hh"
 #include "./zfst.hh"
 
 namespace py = pybind11;

@@ -12,7 +12,7 @@
 
 - Currently `softmax` inputs only are supported, have to provide support for `log_softmax` and `unnormalized` inputs too.
 - Currently this package only accepts BPE tokenized vocabulary, still have to add Character vocab and any other as per requirements.
-- The CTC logic is loosely written, have to cross check once again with the references.
+- Should include tests to ensure seamless working of the CTC logic.
 
 ## Installation
 
