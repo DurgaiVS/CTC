@@ -42,13 +42,13 @@ public:
     }
 
     template <typename T>
-    inline void start_of_word_check(Node<T>* prefix, fst::StdVectorFst* hotwords_fst) const;
+    inline void start_of_word_check(Node<T>* node, fst::StdVectorFst* hotwords_fst) const;
 
     template <typename T>
     inline void initialise_start_states(Node<T>* root, fst::StdVectorFst* hotwords_fst) const;
 
     template <typename T>
-    void run_ext_scoring(zctc::Node<T>* prefix, fst::SortedMatcher<fst::StdVectorFst>* lexicon_matcher,
+    void run_ext_scoring(zctc::Node<T>* node, fst::SortedMatcher<fst::StdVectorFst>* lexicon_matcher,
                          fst::StdVectorFst* hotwords_fst,
                          fst::SortedMatcher<fst::StdVectorFst>* hotwords_matcher) const;
 };
@@ -59,19 +59,19 @@ public:
 
 template <typename T>
 void
-zctc::ExternalScorer::start_of_word_check(Node<T>* prefix, fst::StdVectorFst* hotwords_fst) const
+zctc::ExternalScorer::start_of_word_check(Node<T>* node, fst::StdVectorFst* hotwords_fst) const
 {
-    prefix->is_start_of_word = !(prefix->id == this->apostrophe_id || prefix->parent->id == this->apostrophe_id
-                                 || prefix->token.at(0) == this->tok_sep);
+    node->is_start_of_word = !(node->id == this->apostrophe_id || node->parent->id == this->apostrophe_id
+                                 || node->token.at(0) == this->tok_sep);
 
-    if (!prefix->is_start_of_word)
+    if (!node->is_start_of_word)
         return;
 
     if (this->lexicon)
-        prefix->lexicon_state = this->lexicon->Start();
+        node->lexicon_state = this->lexicon->Start();
 
     if (hotwords_fst)
-        prefix->hotword_state = hotwords_fst->Start();
+        node->hotword_state = hotwords_fst->Start();
 }
 
 template <typename T>
@@ -90,58 +90,65 @@ zctc::ExternalScorer::initialise_start_states(Node<T>* root, fst::StdVectorFst* 
 
 template <typename T>
 void
-zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* prefix, fst::SortedMatcher<fst::StdVectorFst>* lexicon_matcher,
+zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* node, fst::SortedMatcher<fst::StdVectorFst>* lexicon_matcher,
                                       fst::StdVectorFst* hotwords_fst,
                                       fst::SortedMatcher<fst::StdVectorFst>* hotwords_matcher) const
 {
 
     if (this->lm) {
 
-        lm::WordIndex word_id = this->lm->BaseVocabulary().Index(prefix->token);
+        lm::WordIndex word_id = this->lm->BaseVocabulary().Index(node->token);
 
-        if (word_id == 0) { // OOV char
-            prefix->lm_prob = this->penalty;
-        } else {
-            prefix->lm_prob
-                = this->lm_alpha * this->lm->BaseScore(&(prefix->parent->lm_state), word_id, &(prefix->lm_state));
-        }
+        // NOTE: If I just give penalty for OOV, the state will not
+        // be updated. Also, since the `lm_prob` is in log scale,
+        // the penalty could be bigger than the `lm_prob` itself.
+        // Assuming a penalty of -5.0, the `lm_prob` could be -10.0,
+        // which is a huge difference. So just take the `lm_prob`
+        // as it is.
+
+        // if (word_id == 0) { // OOV char
+        //     node->lm_prob = this->penalty;
+        // } else {
+        node->lm_prob
+            = this->lm_alpha * this->lm->BaseScore(&(node->parent->lm_state), word_id, &(node->lm_state));
+        // }
     }
 
-    this->start_of_word_check(prefix, hotwords_fst);
+    this->start_of_word_check(node, hotwords_fst);
 
     if (this->lexicon) {
 
-        if (!(prefix->parent->arc_exist || prefix->is_start_of_word)) {
+        if (!(node->parent->is_lex_path || node->is_start_of_word)) {
 
-            prefix->arc_exist = false;
+            node->is_lex_path = false;
 
         } else {
 
             fst::StdVectorFst::StateId state
-                = prefix->is_start_of_word ? prefix->lexicon_state : prefix->parent->lexicon_state;
+                = node->is_start_of_word ? node->lexicon_state : node->parent->lexicon_state;
             lexicon_matcher->SetState(state);
 
-            if (lexicon_matcher->Find(prefix->id)) {
-                prefix->lexicon_state = lexicon_matcher->Value().nextstate;
-                prefix->arc_exist = true;
+            if (lexicon_matcher->Find(node->id)) {
+                node->lexicon_state = lexicon_matcher->Value().nextstate;
+                node->is_lex_path = true;
             }
         }
 
     } else {
-        prefix->arc_exist = true;
+        node->is_lex_path = true;
     }
 
-    if (hotwords_fst && (prefix->parent->is_hotpath || prefix->is_start_of_word)) {
+    if (hotwords_fst && (node->parent->is_hotpath || node->is_start_of_word)) {
 
         fst::StdVectorFst::StateId state
-            = prefix->is_start_of_word ? prefix->hotword_state : prefix->parent->hotword_state;
+            = node->is_start_of_word ? node->hotword_state : node->parent->hotword_state;
         hotwords_matcher->SetState(state);
 
-        if (hotwords_matcher->Find(prefix->id)) {
+        if (hotwords_matcher->Find(node->id)) {
             const fst::StdArc& arc = hotwords_matcher->Value();
-            prefix->hotword_length = arc.olabel;
-            prefix->hotword_weight = arc.weight.Value();
-            prefix->is_hotpath = true;
+            node->hotword_length = arc.olabel;
+            node->hotword_weight = arc.weight.Value();
+            node->is_hotpath = true;
         }
     }
 }

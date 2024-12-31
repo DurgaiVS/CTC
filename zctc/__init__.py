@@ -1,15 +1,13 @@
 __all__ = ["CTCDecoder", "ZFST"]
 
-from typing import Optional, Union
+from typing import Optional, Union, Tuple
 
-import numpy
 import torch
+
 from _zctc import _ZFST, _Decoder
-from omegaconf import DictConfig
-from registrable import Registrable
 
 
-def get_apostrophe_id_from_vocab(vocab: list[str]) -> int:
+def _get_apostrophe_id_from_vocab(vocab: list[str]) -> int:
     for i, tok in enumerate(vocab):
         if tok == "'":
             return i
@@ -17,7 +15,7 @@ def get_apostrophe_id_from_vocab(vocab: list[str]) -> int:
     return -1
 
 
-class CTCDecoder(Registrable, _Decoder):
+class CTCDecoder(_Decoder):
     def __init__(
         self,
         thread_count: int,
@@ -32,7 +30,7 @@ class CTCDecoder(Registrable, _Decoder):
         lm_path: Optional[str] = None,
         lexicon_fst_path: Optional[str] = None,
     ):
-        apostrophe_id = get_apostrophe_id_from_vocab(vocab)
+        apostrophe_id = _get_apostrophe_id_from_vocab(vocab)
         assert apostrophe_id >= 0, "Cannot find apostrophe from the vocab provided"
 
         super().__init__(
@@ -56,7 +54,7 @@ class CTCDecoder(Registrable, _Decoder):
         seq_lens: torch.Tensor,
         hotwords: list[list[int]] = [],
         hotwords_weight: Union[float, list[float]] = [],
-    ) -> tuple[numpy.ndarray, numpy.ndarray]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Expecting the logits to be softmaxed and not in log scale.
         """
@@ -64,47 +62,39 @@ class CTCDecoder(Registrable, _Decoder):
         if isinstance(hotwords_weight, float):
             hotwords_weight = [hotwords_weight] * len(hotwords)
 
-#TODO : sort hotwords in descending based on weight, and for same weight
-#sort in ascending based on token length...
+        # TODO : sort hotwords in descending based on weight, and for same weight
+        # sort in ascending based on token length...
 
         sorted_indices = (
-            torch.argsort(logits, dim=2, descending=True)
-            .cpu()
-            .numpy()
-            .astype(numpy.int32)
+            torch.argsort(logits, dim=2, descending=True).to("cpu", torch.int32).numpy()
         )
-        labels = torch.zeros(
-            (batch_size, self.beam_width, seq_len), dtype=torch.int32
-        ).numpy()
+        labels = torch.zeros((batch_size, self.beam_width, seq_len), dtype=torch.int32)
         timesteps = torch.zeros(
             (batch_size, self.beam_width, seq_len), dtype=torch.int32
-        ).numpy()
+        )
+        seq_pos = torch.zeros((batch_size, self.beam_width), dtype=torch.int32)
 
         self.batch_decode(
             logits.cpu().numpy(),
             sorted_indices,
-            labels,
-            timesteps,
-            seq_lens.cpu().numpy().astype(numpy.int32),
+            labels.numpy(),
+            timesteps.numpy(),
+            seq_lens.to("cpu", torch.int32).numpy(),
+            seq_pos.numpy(),
             batch_size,
             seq_len,
             hotwords,
             hotwords_weight,
         )
 
-        return labels, timesteps
+        return labels, timesteps, seq_pos
 
     def __call__(self, *args, **kwargs):
         raise NotImplementedError(
             "Override `__call__` method when inheriting from this class"
         )
 
-    @classmethod
-    def from_cfg(cls, cfg: DictConfig, *args, **kwargs):
-        subcls = cls.by_name(cfg.name)
-        return subcls.from_cfg(cfg, *args, **kwargs)
-
 
 class ZFST(_ZFST):
-    def __init__(self, fst_path: Optional[str] = None):
-        super().__init__(fst_path)
+    def __init__(self, vocab_path: str, fst_path: Optional[str] = None):
+        super().__init__(vocab_path, fst_path)

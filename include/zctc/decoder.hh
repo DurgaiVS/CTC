@@ -45,35 +45,39 @@ public:
     template <typename T>
     void batch_decode(py::array_t<T>& batch_log_logits, py::array_t<int>& batch_sorted_ids,
                       py::array_t<int>& batch_labels, py::array_t<int>& batch_timesteps,
-                      py::array_t<int>& batch_seq_len, const int batch_size, const int max_seq_len,
-                      std::vector<std::vector<int>>& hotwords, std::vector<float>& hotwords_weight) const;
+                      py::array_t<int>& batch_seq_len, py::array_t<int>& batch_seq_pos, const int batch_size,
+                      const int max_seq_len, std::vector<std::vector<int>>& hotwords, 
+                      std::vector<float>& hotwords_weight) const;
 };
 
 template <typename T>
 int
-decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, const int seq_len,
+decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, const int seq_len, int* seq_pos,
        fst::StdVectorFst* hotwords_fst)
 {
 
-    bool is_repeat, is_blank;
-    int iter_val;
+    bool is_blank;
+    int iter_val, pos_val;
     T nucleus_max, nucleus_count, prob;
-    int *curr_id, *curr_l, *curr_t;
+    int *curr_id, *curr_l, *curr_t, *curr_p;
     zctc::Node<T>* child;
     std::vector<zctc::Node<T>*> prefixes0, prefixes1;
-    zctc::Node<T> root(zctc::ROOT_ID, -1, true, static_cast<T>(zctc::ZERO), static_cast<T>(decoder->penalty), "<s>",
-                       nullptr);
+    zctc::Node<T> root(zctc::ROOT_ID, -1, static_cast<T>(zctc::ZERO), "<s>", nullptr);
     fst::SortedMatcher<fst::StdVectorFst> lexicon_matcher(decoder->ext_scorer.lexicon, fst::MATCH_INPUT);
     fst::SortedMatcher<fst::StdVectorFst> hotwords_matcher(hotwords_fst, fst::MATCH_INPUT);
 
     nucleus_max = static_cast<T>(decoder->nucleus_prob_per_timestep);
     decoder->ext_scorer.initialise_start_states(&root, hotwords_fst);
 
+    // For performance reasons, we initialise and reserve memory
+    // for the prefixes
     prefixes0.reserve(decoder->cutoff_top_n * decoder->beam_width);
     prefixes1.reserve(decoder->cutoff_top_n * decoder->beam_width);
     prefixes0.push_back(&root);
 
     for (int t = 0; t < seq_len; t++) {
+        // Swap the reader and writer vectors, as per the timestep,
+        // to avoid cleaning and copying the elements.
         std::vector<zctc::Node<T>*>& reader = ((t % 2) == 0 ? prefixes0 : prefixes1);
         std::vector<zctc::Node<T>*>& writer = ((t % 2) == 0 ? prefixes1 : prefixes0);
 
@@ -89,46 +93,65 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
             nucleus_count += prob;
             prob = std::log(prob);
 
-            for (zctc::Node<T>* prefix : reader) {
+            if (is_blank) {
+                // Just update the blank probs and continue
+                // in case of blank.
+                for (zctc::Node<T>* r_node : reader) {
+                    r_node->_b_prob = prob;
+                    r_node->b_ts = t;
 
-                child = prefix->add_to_child(index, t, prob, decoder->vocab[index], is_blank, &is_repeat);
-                writer.push_back(child);
-
-                if (!(is_blank || is_repeat)) {
-                    // only run ext scoring for non-duplicate and non-blank tokens.
-                    decoder->ext_scorer.run_ext_scoring(child, &lexicon_matcher, hotwords_fst, &hotwords_matcher);
-
-                } else {
-                    // in case of repeated token but with less confidence, the probs
-                    // will get included in the path, but we also will keep track of
-                    // the most confident probs and its timestep.
-                    child->lm_state = prefix->lm_state;
-
-                    child->lexicon_state = prefix->lexicon_state;
-                    child->arc_exist = prefix->arc_exist;
-
-                    child->hotword_state = prefix->hotword_state;
-                    child->hotword_length = prefix->hotword_length;
-                    child->hotword_weight = prefix->hotword_weight;
-                    child->is_hotpath = prefix->is_hotpath;
-
-                    // only non-blank and repeated token's LM probs will be used.
-                    if (!is_blank) {
-                        child->lm_prob = prefix->lm_prob;
-                    }
+                    writer.push_back(r_node);
                 }
 
-                // update total score for the node,
-                // considering probs, LM probs, OOV penalty.
-                child->update_score();
+                continue;
+            }
+
+            for (zctc::Node<T>* r_node : reader) {
+                // Check if the index is repeat or not and 
+                // update the node accordingly
+                child = r_node->extend_path(index, t, prob, decoder->vocab[index], writer);
+
+                /*
+                `nullptr` means the path extension was not done,
+                (ie) no new node was created, 
+                the probs were accumulated within the current node.
+                */
+                if (child == nullptr) continue;
+
+                // only newly created nodes are considered for external scoring.
+                decoder->ext_scorer.run_ext_scoring(child, &lexicon_matcher, hotwords_fst, &hotwords_matcher);
             }
 
             if (nucleus_count >= nucleus_max)
                 break;
         }
 
-        reader.clear();
+        for (zctc::Node<T>* w_node : writer) {
+            /*
+            update total score for the node,
+            considering probs, LM probs, OOV penalty
+            recently updated token and blank probs
+            */
 
+            w_node->update_score(decoder->penalty);
+            /*
+            NOTE: Doing the update step here, to avoid
+            the current timestep's repeat token prob
+            of the node, getting included with a
+            different symbol that is getting extended
+            in this timestep, like,
+
+                -->        a (in this case, the probs will be acc to the curr node itself)
+                |
+            a ---->  (blank) (in this case, the probs will be acc to the curr node itself)
+                |
+                -->        b (in this case, a new node is created and the path is extended)
+
+            */
+
+        }
+
+        reader.clear();
         if (writer.size() < decoder->beam_width)
             continue;
 
@@ -141,24 +164,28 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
     std::stable_sort(reader.begin(), reader.end(), Decoder::descending_compare<T>);
 
     iter_val = 1;
-    for (zctc::Node<T>* prefix : reader) {
+    curr_p = seq_pos;
+    for (zctc::Node<T>* r_node : reader) {
 
         curr_t = timestep + ((seq_len * iter_val) - 1);
         curr_l = label + ((seq_len * iter_val) - 1);
+        pos_val = seq_len;
 
-        while (prefix->id != zctc::ROOT_ID) {
+        while (r_node->id != zctc::ROOT_ID) {
 
-            *curr_l = prefix->id;
-            *curr_t = prefix->timestep;
+            *curr_l = r_node->id;
+            *curr_t = r_node->ts;
 
-            // if index becomes less than 0, might throw error
             curr_l--;
             curr_t--;
+            pos_val--;
 
-            prefix = prefix->parent;
+            r_node = r_node->parent;
         }
 
+        *curr_p = pos_val;
         iter_val++;
+        curr_p++;
     }
 
     return 0;
@@ -179,10 +206,11 @@ template <typename T>
 void
 zctc::Decoder::batch_decode(py::array_t<T>& batch_log_logits, py::array_t<int>& batch_sorted_ids,
                             py::array_t<int>& batch_labels, py::array_t<int>& batch_timesteps,
-                            py::array_t<int>& batch_seq_len, const int batch_size, const int max_seq_len,
-                            std::vector<std::vector<int>>& hotwords, std::vector<float>& hotwords_weight) const
+                            py::array_t<int>& batch_seq_len, py::array_t<int>& batch_seq_pos, const int batch_size,
+                            const int max_seq_len, std::vector<std::vector<int>>& hotwords, 
+                            std::vector<float>& hotwords_weight) const
 {
-    ThreadPool pool(this->thread_count);
+    ThreadPool pool(std::min(this->thread_count, batch_size));
     std::vector<std::future<int>> results;
 
     fst::StdVectorFst hotwords_fst;
@@ -195,24 +223,28 @@ zctc::Decoder::batch_decode(py::array_t<T>& batch_log_logits, py::array_t<int>& 
     py::buffer_info labels_buf = batch_labels.request(true);
     py::buffer_info timesteps_buf = batch_timesteps.request(true);
     py::buffer_info seq_len_buf = batch_seq_len.request();
+    py::buffer_info seq_pos_buf = batch_seq_pos.request(true);
 
     if (logits_buf.ndim != 3 || ids_buf.ndim != 3 || labels_buf.ndim != 3 || timesteps_buf.ndim != 3
-        || seq_len_buf.ndim != 1)
+        || seq_len_buf.ndim != 1 || seq_pos_buf.ndim != 2)
         throw std::runtime_error("Logits must be three dimensional, like Batch x Seq-len x Vocab, "
-                                 "and Sequence Length must be one dimensional, like Batch");
+                                 "and Sequence Length must be one dimensional, like Batch"
+                                 "and Sequence Pos mus be two dimensional, like Batch x BeamWidth");
 
+    T* logits = static_cast<T*>(logits_buf.ptr);
     int* ids = static_cast<int*>(ids_buf.ptr);
     int* labels = static_cast<int*>(labels_buf.ptr);
     int* timesteps = static_cast<int*>(timesteps_buf.ptr);
     int* seq_len = static_cast<int*>(seq_len_buf.ptr);
-    T* logits = static_cast<T*>(logits_buf.ptr);
+    int* seq_pos = static_cast<int*>(seq_pos_buf.ptr);
 
-    for (int i = 0, ip_pos = 0, op_pos = 0; i < batch_size; i++) {
+    for (int i = 0, ip_pos = 0, op_pos = 0, s_p = 0; i < batch_size; i++) {
         ip_pos = i * max_seq_len * this->vocab_size;
         op_pos = i * this->beam_width * max_seq_len;
+        s_p = i * this->beam_width;
 
         results.emplace_back(pool.enqueue(zctc::decode<T>, this, logits + ip_pos, ids + ip_pos, labels + op_pos,
-                                          timesteps + op_pos, *(seq_len + i),
+                                          timesteps + op_pos, *(seq_len + i), seq_pos + s_p,
                                           (hotwords.empty() ? nullptr : &hotwords_fst)));
     }
 
