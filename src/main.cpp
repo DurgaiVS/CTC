@@ -66,7 +66,7 @@ debug_decoder()
     // To generate random values for logits
     std::random_device rnd_device;
     std::mt19937 mersenne_engine { rnd_device() };
-    std::uniform_real_distribution<float> dist { 0.0f, 0.03f };
+    std::uniform_real_distribution<float> dist { 0.0f, 0.05f };
     auto gen = [&dist, &mersenne_engine]() { return dist(mersenne_engine); };
 
     for (int t = 0, temp = 0; t < iter_count; t++) {

@@ -120,21 +120,53 @@ zctc::Node<T>::extend_path(int id, int ts, T prob, const std::string token, std:
     Node<T>* child;
 
     if (id == this->id) {
-        // In case, if the token is the most recent than the blank, or,
-        // if the blank and token are at the same timestep,
-        // within this node,
-        // we can accumulate the probs with the current node.
-        if (this->tk_prob >= this->b_ts) {
+        /*
+        In case, if the token is the most recent than the blank, or,
+        if the blank and token are at the same timestep,
+        within this node,
+        we can accumulate the probs with the current node.
+
+        The assumption here is,
+        If the token is the most recent than the blank, then we will
+        treat the token as monotonic, and we won't extend the path,
+        rather we will accumulate the probs with the current node.
+        */
+        if (this->tk_ts >= this->b_ts) {
             this->acc_repeat_token_prob(ts, prob);
             writer.push_back(this);
         }
 
-        // In case, if the blank is more recent than the token, or,
-        // if the blank and token are at the same timestep,
-        // within this node,
-        // we can create a new child, assuming that the current token
-        // (the one passed in the argument) is preceded by a blank.
+        /*
+        In case, if the blank is more recent than the token, or,
+        if the blank and token are at the same timestep,
+        within this node,
+        we can create a new child, assuming that the current token
+        (the one passed in the argument) is preceded by a blank.
+
+        The assumption here is,
+        If the blank is the most recent than the token, then we will
+        treat the token as non-monotonic, and we will extend the path,
+        rather than accumulating the probs with the current node, due to
+        the fact that the token is preceded by a blank.
+        */
         if ((this->b_prob != zctc::ZERO) && (this->b_ts >= this->tk_ts)) {
+            /*
+            In case, if the child is already available, we can just update
+            the probs and return the child.
+            Not sure if this case is possible or not, but just wanted to
+            ensure that we are not creating duplicate child nodes.
+            */
+            for (Node<T>* r_node : *this) {
+                if (r_node->id != id) continue;
+
+                r_node->tk_prob += prob;
+                if (ts > r_node->tk_ts) r_node->tk_ts = ts;
+
+                writer.push_back(r_node);
+                return nullptr;
+            }
+
+            // If the child is not available, then we can create a new child.
             child = new Node<T>(id, ts, prob, token, this);
 
             this->childs.push_back(child);
@@ -145,9 +177,11 @@ zctc::Node<T>::extend_path(int id, int ts, T prob, const std::string token, std:
         return nullptr;
     }
 
-    for (Node<T>* r_node : this->childs) {
+    for (Node<T>* r_node : *this) {
         if (r_node->id != id) continue;
 
+        // If the current node has a child with the provided id,
+        // then we can accumulate the probs within the child node.
         child = r_node->extend_path(id, ts, prob, token, writer);
         return child;
     }
