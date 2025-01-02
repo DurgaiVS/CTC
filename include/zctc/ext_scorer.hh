@@ -131,6 +131,8 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* node, fst::SortedMatcher<fs
             if (lexicon_matcher->Find(node->id)) {
                 node->lexicon_state = lexicon_matcher->Value().nextstate;
                 node->is_lex_path = true;
+            } else {
+                node->is_lex_path = false;
             }
         }
 
