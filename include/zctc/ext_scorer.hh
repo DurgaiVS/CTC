@@ -110,7 +110,9 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* node, fst::SortedMatcher<fs
         //     node->lm_prob = this->penalty;
         // } else {
         node->lm_prob
-            = this->lm_alpha * this->lm->BaseScore(&(node->parent->lm_state), word_id, &(node->lm_state));
+            = std::exp(
+                this->lm_alpha * this->lm->BaseScore(&(node->parent->lm_state), word_id, &(node->lm_state))
+            );
         // }
     }
 

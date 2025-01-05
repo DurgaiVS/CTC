@@ -198,7 +198,7 @@ zctc::parse_lexicon_file(zctc::ZFST* zfst, std::string file_path, int freq_thres
 
         while (iss.good()) {
             iss >> tmp;
-            tokens.push_back(zfst->char_map[tmp]);
+            tokens.emplace_back(zfst->char_map[tmp]);
         }
 
         zfst->insert_into_fst(&matcher, tokens);

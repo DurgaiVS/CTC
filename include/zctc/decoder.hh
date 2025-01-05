@@ -1,8 +1,6 @@
 #ifndef _ZCTC_DECODER_H
 #define _ZCTC_DECODER_H
 
-#include <cmath>
-
 #include <ThreadPool.h>
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
@@ -61,6 +59,7 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
     T nucleus_max, nucleus_count, prob;
     int *curr_id, *curr_l, *curr_t, *curr_p;
     zctc::Node<T>* child;
+    std::vector<int> duplicte_ids;
     std::vector<zctc::Node<T>*> prefixes0, prefixes1;
     zctc::Node<T> root(zctc::ROOT_ID, -1, static_cast<T>(zctc::ZERO), "<s>", nullptr);
     fst::SortedMatcher<fst::StdVectorFst> lexicon_matcher(decoder->ext_scorer.lexicon, fst::MATCH_INPUT);
@@ -73,7 +72,7 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
     // for the prefixes
     prefixes0.reserve(decoder->cutoff_top_n * decoder->beam_width);
     prefixes1.reserve(decoder->cutoff_top_n * decoder->beam_width);
-    prefixes0.push_back(&root);
+    prefixes0.emplace_back(&root);
 
     for (int t = 0; t < seq_len; t++) {
         // Swap the reader and writer vectors, as per the timestep,
@@ -91,16 +90,15 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 
             is_blank = index == decoder->blank_id;
             nucleus_count += prob;
-            prob = std::log(prob);
+            // prob = std::log(prob);
 
             if (is_blank) {
                 // Just update the blank probs and continue
                 // in case of blank.
                 for (zctc::Node<T>* r_node : reader) {
-                    r_node->_b_prob = prob;
-                    r_node->b_ts = t;
-
-                    writer.push_back(r_node);
+                    r_node->_b_prob += prob;
+                    r_node->_update_required = true;
+                    writer.emplace_back(r_node);
                 }
 
                 continue;
@@ -126,6 +124,7 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
                 break;
         }
 
+        pos_val = 0;
         for (zctc::Node<T>* w_node : writer) {
             /*
             update total score for the node,
@@ -133,7 +132,11 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
             recently updated token and blank probs
             */
 
-            w_node->update_score(decoder->penalty);
+            if (!w_node->_update_required) {
+                duplicte_ids.emplace_back(pos_val);
+            }
+            pos_val++;
+            w_node->update_score(decoder->penalty, t);
             /*
             NOTE: Doing the update step here, to avoid
             the current timestep's repeat token prob
@@ -141,16 +144,25 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
             different symbol that is getting extended
             in this timestep, like,
 
-                -->        a (in this case, the probs will be acc to the curr node itself)
+                -->        a -  (in this case, the probs will be acc to the curr node itself)
+                                (if the prev node has a most recent blank too, then new node)
+                                (will also be created and the path will be extended)
                 |
-            a ---->  (blank) (in this case, the probs will be acc to the curr node itself)
+            a ---->  (blank) -  (in this case, the probs will be acc to the curr node itself)
                 |
-                -->        b (in this case, a new node is created and the path is extended)
+                -->        b -  (in this case, a new node is created and the path is extended)
 
             */
 
         }
 
+        pos_val = 0;
+        for (int pos : duplicte_ids) {
+            writer.erase(writer.begin() + pos - pos_val);
+            pos_val++;
+        }
+
+        duplicte_ids.clear();
         reader.clear();
         if (writer.size() < decoder->beam_width)
             continue;
@@ -161,7 +173,7 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
     }
 
     std::vector<zctc::Node<T>*>& reader = ((seq_len % 2) == 0 ? prefixes0 : prefixes1);
-    std::stable_sort(reader.begin(), reader.end(), Decoder::descending_compare<T>);
+    std::sort(reader.begin(), reader.end(), Decoder::descending_compare<T>);
 
     iter_val = 1;
     curr_p = seq_pos;
@@ -199,7 +211,7 @@ template <typename T>
 bool
 zctc::Decoder::descending_compare(zctc::Node<T>* x, zctc::Node<T>* y)
 {
-    return x->score_w_h > y->score_w_h;
+    return x->h_score > y->h_score;
 }
 
 template <typename T>

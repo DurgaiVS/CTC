@@ -16,7 +16,7 @@ load_vocab(std::vector<std::string>& vocab, const char* vocab_path)
 
     std::string line;
     while (std::getline(inputFile, line)) {
-        vocab.push_back(line);
+        vocab.emplace_back(line);
 
         if (line == "'")
             apostrophe_id = vocab.size() - 1;
@@ -97,10 +97,9 @@ debug_manually_decoder()
 {
 
     char tok_sep = '#';
-    int blank_id = 0, seq_len = 3, thread_count = 1, cutoff_top_n = 3;
+    int blank_id = 0, seq_len = 2, thread_count = 1, cutoff_top_n = 3;
     float nucleus_prob_per_timestep = 1.0, penalty = -5.0, lm_alpha = 0.017;
     std::size_t beam_width = 9;
-    std::string lm_path, lexicon_path, vocab_path;
     std::vector<std::string> vocab = {"_", "'", "b"};
 
     zctc::Decoder decoder(thread_count, blank_id, cutoff_top_n, 1, nucleus_prob_per_timestep, lm_alpha,
@@ -122,6 +121,13 @@ debug_manually_decoder()
 
     zctc::decode<float>(&decoder, logits.data(), sorted_indices.data(), labels.data(), timesteps.data(), seq_len,
                         seq_pos.data(), nullptr);
+
+    for (int i = 0; i < decoder.beam_width; i++) {
+        for (int j = 0; j < seq_len; j++) {
+            std::cout << labels[i * seq_len + j] << " ";
+        }
+        std::cout << std::endl;
+    }
 
 }
 
