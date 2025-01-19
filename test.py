@@ -102,9 +102,6 @@ if __name__ == "__main__":
     vocab, apostrophe_id = read_vocab(vocab_path)
     vocab_size = len(vocab)
     tok_sep = "#"
-    CURSOR_UP_ONE = "\x1b[1A"
-    ERASE_LINE = "\x1b[2K"
-    pattern = ((ERASE_LINE + CURSOR_UP_ONE) * 6) + ERASE_LINE
 
     old_decoder = CTCBeamDecoder(
         vocab,
@@ -168,9 +165,5 @@ if __name__ == "__main__":
             op_s_new = op_s_new[0]
             op_s_new = op_s_new[op_s_new != 0]
 
-        if (i + 1) % iterations == 0:
-            print(pattern)
-            print(f"AVG time for OLD CTC after {i+1} runs: ", OLD_val / (i + 1))
-            print(f"AVG time for NEW CTC after {i+1} runs: ", NEW_val / (i + 1))
-
-            gc.collect()
+    print(f"AVG time for OLD CTC after {iterations} runs: ", OLD_val / (iterations))
+    print(f"AVG time for NEW CTC after {iterations} runs: ", NEW_val / (iterations))

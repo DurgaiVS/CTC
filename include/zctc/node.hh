@@ -56,14 +56,39 @@ public:
         this->p_score = parent->score;
     }
 
+    // Copy Constructor
+    Node(const Node& other)
+        : is_lex_path(other.is_lex_path)
+        , is_start_of_word(other.is_start_of_word)
+        , is_hotpath(other.is_hotpath)
+        , _update_required(other._update_required)
+        , hotword_length(other.hotword_length)
+        , ts(other.ts)
+        , b_ts(other.b_ts)
+        , tk_ts(other.tk_ts)
+        , _tk_prob(other._tk_prob)
+        , _b_prob(other._b_prob)
+        , _intrm_score(other._intrm_score)
+        , max_prob(other.max_prob)
+        , _max_prob(other._max_prob)
+        , p_score(other.p_score)
+        , lm_prob(other.lm_prob)
+        , score(other.score)
+        , h_score(other.h_score)
+        , hotword_weight(other.hotword_weight)
+        , id(other.id)
+        , token(other.token)
+        , parent(other.parent)
+    { }
+
     ~Node()
     {
         for (Node<T>* child : *this)
             delete child;
     }
 
-    inline void acc_prob(T prob) noexcept;
-    inline void acc_tk_and_parent_prob(T prob) noexcept;
+    inline void acc_prob(T prob, std::vector<Node<T>*>& writer) noexcept;
+    inline void acc_tk_and_parent_prob(T prob, std::vector<Node<T>*>& writer) noexcept;
     inline void update_score(float penalty, int curr_ts) noexcept;
 
     Node<T>* extend_path(int id, int ts, T prob, const std::string token, std::vector<Node<T>*>& writer);
@@ -80,31 +105,6 @@ public:
 
 /* ---------------------------------------------------------------------------- */
 
-template <typename T>
-void
-zctc::Node<T>::acc_prob(T prob) noexcept
-{
-    this->_tk_prob += prob;
-    this->_update_required = true;
-
-    if (prob > this->_max_prob) {
-        this->_max_prob = prob;
-    }
-}
-
-template <typename T>
-void
-zctc::Node<T>::acc_tk_and_parent_prob(T prob) noexcept
-{
-    if (this->parent->score == this->p_score) {
-        this->_tk_prob += prob;
-        return;
-    }
-
-    T diff_prob = this->p_score - this->parent->score;
-    this->_tk_prob += std::exp(diff_prob + std::log(prob));
-    
-}
 
 template <typename T>
 void
@@ -121,11 +121,10 @@ zctc::Node<T>::update_score(float penalty, int curr_ts) noexcept
     */
     if (!this->_update_required) return;
 
-    if (this->_max_prob > this->max_prob) {
+    if (this->_max_prob != this->max_prob) {
         this->max_prob = this->_max_prob;
         this->ts = curr_ts;
     }
-
 
     /*
         Here, the `_tk_prob` and `_b_prob` and `lm_prob` will be in
@@ -149,6 +148,43 @@ zctc::Node<T>::update_score(float penalty, int curr_ts) noexcept
 }
 
 template <typename T>
+void
+zctc::Node<T>::acc_prob(T prob, std::vector<zctc::Node<T>*>& writer) noexcept
+{
+    zctc::Node<T>* node = this;
+    if (prob > this->_max_prob) {
+        node = new zctc::Node<T>(*this);
+        node->_max_prob = prob;
+    }
+    node->_tk_prob += prob;
+    node->_update_required = true;
+
+    writer.emplace_back(node);
+}
+
+template <typename T>
+void
+zctc::Node<T>::acc_tk_and_parent_prob(T prob, std::vector<zctc::Node<T>*>& writer) noexcept
+{
+    zctc::Node<T>* node = this;
+    if (prob > this->_max_prob) {
+        node = new zctc::Node<T>(*this);
+        node->_max_prob = prob;
+    }
+
+    node->_update_required = true;
+    writer.emplace_back(node);
+
+    if (node->parent->score == node->p_score) {
+        node->_tk_prob += prob;
+        return;
+    }
+
+    T diff_prob = node->p_score - node->parent->score;
+    node->_tk_prob += std::exp(diff_prob + std::log(prob));
+}
+
+template <typename T>
 zctc::Node<T>*
 zctc::Node<T>::acc_repeat_token_prob(int ts, T prob, std::vector<zctc::Node<T>*>& writer) noexcept
 {
@@ -163,10 +199,7 @@ zctc::Node<T>::acc_repeat_token_prob(int ts, T prob, std::vector<zctc::Node<T>*>
         treat the token as monotonic, and we won't extend the path,
         rather we will accumulate the probs with the current node.
     */
-    if (this->tk_ts >= this->b_ts) {
-        this->acc_prob(prob);
-        writer.emplace_back(this);
-    }
+    if (this->tk_ts >= this->b_ts) this->acc_prob(prob, writer);
 
     /*
         In case, if the blank is more recent than the token, or,
@@ -191,8 +224,7 @@ zctc::Node<T>::acc_repeat_token_prob(int ts, T prob, std::vector<zctc::Node<T>*>
         for (zctc::Node<T>* r_node : *this) {
             if (r_node->id != id) continue;
 
-            r_node->acc_prob(prob);
-            writer.emplace_back(r_node);
+            r_node->acc_prob(prob, writer);
             return nullptr;
         }
 
@@ -211,27 +243,29 @@ template <typename T>
 zctc::Node<T>*
 zctc::Node<T>::extend_path(int id, int ts, T prob, const std::string token, std::vector<zctc::Node<T>*>& writer)
 {
+    /*
+        TODO: In case of repeat, but with most confident prob,
+        then, try to create a new node, coz updating in this node
+        will affect the previously added child's timesteps.
+    */
+
     if (id == this->id) 
         return this->acc_repeat_token_prob(ts, prob, writer);
 
     for (Node<T>* r_node : *this) {
         if (r_node->id != id) continue;
 
-        // If the current node has a child with the provided id,
-        // then we can accumulate the probs within the child node.
-        // r_node->acc_repeat_token_prob_from_parent(ts, prob);
-        // r_node->p_score = this->score;
         /*
-            Doing this here, to incorporate the whole path's probs
-            into the score, due to the inability to incorporate these
-            lines into the `update_score` function.
+            If the current node has a child with the provided id,
+            then we can accumulate the probs within the child node.
 
-            TODO: Due to this, the `r_node` when encountering in the
-            reader, is expanding with the below updated score, which
-            is not desirable, try to have a better approach.
+            Since, we're accumulating the repeated and blank probs
+            within the node itself, there could be a possibility that
+            the parent's probs have changed from the timestep this
+            child was created, so we need to update the parent probs
+            value in the child node too...
         */
-        r_node->acc_tk_and_parent_prob(prob);
-        writer.emplace_back(r_node);
+        r_node->acc_tk_and_parent_prob(prob, writer);
         return nullptr;
     }
 
