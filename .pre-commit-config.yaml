@@ -26,6 +26,7 @@ repos:
         entry: clang-format
         language: python
         args:
+          - -style=file
           - -i
           - "**/**/*hh"
           - "**/*cpp"

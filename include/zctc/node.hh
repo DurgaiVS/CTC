@@ -79,6 +79,9 @@ public:
         , id(other.id)
         , token(other.token)
         , parent(other.parent)
+        , lm_state(other.lm_state) // TODO: Verify if the copy constructor is clean.
+        , lexicon_state(other.lexicon_state)
+        , hotword_state(other.hotword_state)
     { }
 
     ~Node()
@@ -249,7 +252,7 @@ zctc::Node<T>::extend_path(int id, int ts, T prob, const std::string token, std:
         will affect the previously added child's timesteps.
     */
 
-    if (id == this->id) 
+    if (id == this->id)
         return this->acc_repeat_token_prob(ts, prob, writer);
 
     for (Node<T>* r_node : *this) {
