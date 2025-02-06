@@ -1,6 +1,6 @@
 __all__ = ["CTCDecoder", "ZFST"]
 
-from typing import Optional, Union, Tuple
+from typing import Optional, Tuple, Union
 
 import torch
 
@@ -22,7 +22,8 @@ class CTCDecoder(_Decoder):
         blank_id: int,
         cutoff_top_n: int,
         cutoff_prob: float,
-        lm_alpha: float,
+        alpha: float,
+        beta: float,
         beam_width: int,
         vocab: list[str],
         unk_score: float = -5.0,
@@ -39,7 +40,8 @@ class CTCDecoder(_Decoder):
             cutoff_top_n,
             apostrophe_id,
             cutoff_prob,
-            lm_alpha,
+            alpha,
+            beta,
             beam_width,
             unk_score,
             tok_sep,
@@ -62,8 +64,8 @@ class CTCDecoder(_Decoder):
         if isinstance(hotwords_weight, float):
             hotwords_weight = [hotwords_weight] * len(hotwords)
 
-        # TODO : sort hotwords in descending based on weight, and for same weight
-        # sort in ascending based on token length...
+#TODO : sort hotwords in descending based on weight, and for same weight
+#sort in ascending based on token length...
 
         sorted_indices = (
             torch.argsort(logits, dim=2, descending=True).to("cpu", torch.int32).numpy()
