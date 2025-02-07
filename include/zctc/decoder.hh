@@ -37,7 +37,8 @@ public:
 		, penalty(penalty)
 		, beam_width(beam_width)
 		, vocab(vocab)
-		, ext_scorer(tok_sep, apostrophe_id, std::log(alpha), penalty, lm_path, lexicon_path)
+		// NOTE: KenLM uses log base 10
+		, ext_scorer(tok_sep, apostrophe_id, std::log10(alpha), penalty, lm_path, lexicon_path)
 	{
 	}
 
@@ -75,14 +76,14 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 	prefixes1.reserve(decoder->cutoff_top_n * decoder->beam_width);
 	prefixes0.emplace_back(&root);
 
-	for (int t = 0; t < seq_len; t++) {
+	for (int timestep = 0; timestep < seq_len; timestep++) {
 		// Swap the reader and writer vectors, as per the timestep,
 		// to avoid cleaning and copying the elements.
-		std::vector<zctc::Node<T>*>& reader = ((t % 2) == 0 ? prefixes0 : prefixes1);
-		std::vector<zctc::Node<T>*>& writer = ((t % 2) == 0 ? prefixes1 : prefixes0);
+		std::vector<zctc::Node<T>*>& reader = ((timestep % 2) == 0 ? prefixes0 : prefixes1);
+		std::vector<zctc::Node<T>*>& writer = ((timestep % 2) == 0 ? prefixes1 : prefixes0);
 
 		nucleus_count = 0;
-		iter_val = t * decoder->vocab_size;
+		iter_val = timestep * decoder->vocab_size;
 		curr_id = ids + iter_val;
 
 		for (int i = 0, index = 0; i < decoder->cutoff_top_n; i++, curr_id++) {
@@ -108,7 +109,7 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 			for (zctc::Node<T>* r_node : reader) {
 				// Check if the index is repeat or not and
 				// update the node accordingly
-				child = r_node->extend_path(index, t, prob, decoder->vocab[index], writer);
+				child = r_node->extend_path(index, timestep, prob, decoder->vocab[index], writer);
 
 				/*
 				`nullptr` means the path extension was not done,
@@ -138,21 +139,21 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 				duplicte_ids.emplace_back(pos_val);
 			}
 			pos_val++;
-			w_node->update_score(decoder->penalty, t, decoder->beta);
+			w_node->update_score(decoder->penalty, timestep, decoder->beta);
 			/*
 			NOTE: Doing the update step here, to avoid
-			the current timestep's repeat token prob
-			of the node, getting included with a
-			different symbol that is getting extended
-			in this timestep, like,
+				  the current timestep's repeat token prob
+				  of the node, getting included with a
+				  different symbol that is getting extended
+				  in this timestep, like,
 
-				-->        a -  (in this case, the probs will be acc to the curr node itself)
-								(if the prev node has a most recent blank too, then new node)
-								(will also be created and the path will be extended)
+				-->        a -  (In this case, the probs will be acc to the curr node itself.)
+								(If the prev node has a most recent blank too, then new node)
+								(will also be created and the path will be extended.)
 				|
-			a ---->  (blank) -  (in this case, the probs will be acc to the curr node itself)
+			a ---->  (blank) -  (In this case, the probs will be acc to the curr node itself.)
 				|
-				-->        b -  (in this case, a new node is created and the path is extended)
+				-->        b -  (In this case, a new node is created and the path is extended.)
 
 			*/
 		}
@@ -240,7 +241,7 @@ zctc::Decoder::batch_decode(py::array_t<T>& batch_log_logits, py::array_t<int>& 
 
 	if (logits_buf.ndim != 3 || ids_buf.ndim != 3 || labels_buf.ndim != 3 || timesteps_buf.ndim != 3
 		|| seq_len_buf.ndim != 1 || seq_pos_buf.ndim != 2)
-		throw std::runtime_error("Logits must be three dimensional, like Batch x Seq-len x Vocab, "
+		throw std::runtime_error("Logits must be three dimensional, like Batch x SeqLen x Vocab, "
 								 "and Sequence Length must be one dimensional, like Batch"
 								 "and Sequence Pos mus be two dimensional, like Batch x BeamWidth");
 

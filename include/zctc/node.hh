@@ -73,7 +73,7 @@ public:
 		, _b_prob(other._b_prob)
 		, _intrm_score(other._intrm_score)
 		, max_prob(other.max_prob)
-		, _max_prob(other._max_prob)
+		, _max_prob(other.max_prob)
 		, p_score(other.p_score)
 		, lm_prob(other.lm_prob)
 		, score(other.score)
@@ -141,15 +141,17 @@ zctc::Node<T>::update_score(float penalty, int curr_ts, const float beta) noexce
 	this->score = this->p_score + this->_intrm_score;
 
 	if (this->lm_prob != zctc::ZERO)
-		this->score = std::log(std::exp(this->score) + this->lm_prob + (beta * this->seq_length));
+		this->score = std::log(std::exp(this->score) + this->lm_prob);
 
 	if (!this->is_lex_path)
 		this->score += penalty;
 
+	this->h_score = std::exp(this->score) + (beta * this->seq_length);
+
 	if (this->is_hotpath) {
-		this->h_score = this->score + (this->hotword_length * this->hotword_weight);
+		this->h_score = std::log(this->h_score + (this->hotword_length * this->hotword_weight));
 	} else {
-		this->h_score = this->score;
+		this->h_score = std::log(this->h_score);
 	}
 
 	this->_tk_prob = zctc::ZERO;

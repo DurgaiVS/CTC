@@ -102,18 +102,24 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* node, fst::SortedMatcher<fs
 
 		lm::WordIndex word_id = this->lm->BaseVocabulary().Index(node->token);
 
-		// NOTE: If I just give penalty for OOV, the state will not
-		// be updated. Also, since the `lm_prob` is in log scale,
-		// the penalty could be bigger than the `lm_prob` itself.
-		// Assuming a penalty of -5.0, the `lm_prob` could be -10.0,
-		// which is a huge difference. So just take the `lm_prob`
-		// as it is.
+		/*
+		NOTE: If I just give penalty for OOV, the state will not
+			  be updated. Also, since the `lm_prob` is in log scale,
+			  the penalty could be bigger than the `lm_prob` itself.
+			  Assuming a penalty of -5.0, the `lm_prob` could be -10.0,
+			  which is a huge difference. So just take the `lm_prob`
+			  as it is.
+		*/
 
 		// if (word_id == 0) { // OOV char
 		//     node->lm_prob = this->penalty;
 		// } else {
+		/*
+		NOTE: Since KenLM returns the log probability with base 10,
+			  convert the log probability to linear scale.
+		*/
 		node->lm_prob
-			= std::exp(this->alpha + this->lm->BaseScore(&(node->parent->lm_state), word_id, &(node->lm_state)));
+			= std::pow(10.0f, this->alpha + this->lm->BaseScore(&(node->parent->lm_state), word_id, &(node->lm_state)));
 		// }
 	}
 
