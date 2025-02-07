@@ -9,6 +9,7 @@ build = "build.py"
 [tool.poetry.dependencies]
 python = "^3.9.0"
 torch = "^2.2.0"
+numpy = "^1.21.0"
 
 [tool.poetry.dev-dependencies]
 pylint = "*"
