@@ -62,7 +62,7 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 	int *curr_id, *curr_l, *curr_t, *curr_p;
 	zctc::Node<T>* child;
 	std::vector<int> duplicte_ids;
-	std::vector<zctc::Node<T>*> prefixes0, prefixes1;
+	std::vector<zctc::Node<T>*> prefixes0, prefixes1, more_confident_repeats;
 	zctc::Node<T> root(zctc::ROOT_ID, -1, static_cast<T>(zctc::ZERO), "<s>", nullptr);
 	fst::SortedMatcher<fst::StdVectorFst> lexicon_matcher(decoder->ext_scorer.lexicon, fst::MATCH_INPUT);
 	fst::SortedMatcher<fst::StdVectorFst> hotwords_matcher(hotwords_fst, fst::MATCH_INPUT);
@@ -139,7 +139,7 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 				duplicte_ids.emplace_back(pos_val);
 			}
 			pos_val++;
-			w_node->update_score(decoder->penalty, timestep, decoder->beta);
+			w_node->update_score(decoder->penalty, timestep, decoder->beta, more_confident_repeats);
 			/*
 			NOTE: Doing the update step here, to avoid
 				  the current timestep's repeat token prob
@@ -163,7 +163,11 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 			writer.erase(writer.begin() + pos - pos_val);
 			pos_val++;
 		}
+		for (zctc::Node<T>* repeat_node : more_confident_repeats) {
+			writer.emplace_back(repeat_node);
+		}
 
+		more_confident_repeats.clear();
 		duplicte_ids.clear();
 		reader.clear();
 		if (writer.size() < decoder->beam_width)

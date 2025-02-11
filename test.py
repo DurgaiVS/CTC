@@ -1,7 +1,3 @@
-import gc
-import random
-import logging
-from pathlib import Path
 from time import time
 from typing import List
 
@@ -126,6 +122,7 @@ if __name__ == "__main__":
         cutoff_top_n,
         cutoff_prob,
         alpha,
+        beta,
         beam_width,
         vocab,
         unk_score,
@@ -156,14 +153,6 @@ if __name__ == "__main__":
         op_old, ts_old, out_seq_len, op_new, ts_new = infer_both_decoder(
             old_decoder, new_decoder, logits, seq_lens
         )
-
-        for op_s_old, op_s_new, s_l, a_max in zip(
-            op_old, op_new, out_seq_len, op_graph_path(logits)
-        ):
-            s_l = s_l[0]
-            op_s_old = op_s_old[0][:s_l]
-            op_s_new = op_s_new[0]
-            op_s_new = op_s_new[op_s_new != 0]
 
     print(f"AVG time for OLD CTC after {iterations} runs: ", OLD_val / (iterations))
     print(f"AVG time for NEW CTC after {iterations} runs: ", NEW_val / (iterations))

@@ -18,7 +18,7 @@ class Node {
 public:
 	bool is_lex_path, is_start_of_word, is_hotpath, _update_required;
 	int hotword_length, ts, b_ts, tk_ts, seq_length;
-	T _tk_prob, _b_prob, _intrm_score;
+	T _tk_prob, _b_prob, _intrm_score, _squash_prob;
 	T max_prob, _max_prob, p_score, lm_prob, score, h_score, hotword_weight;
 	const int id;
 	const std::string token;
@@ -39,6 +39,7 @@ public:
 		, _tk_prob(prob)
 		, _b_prob(zctc::ZERO)
 		, _intrm_score(zctc::ZERO)
+		, _squash_prob(zctc::ZERO)
 		, max_prob(prob)
 		, _max_prob(prob)
 		, p_score(zctc::ZERO)
@@ -69,11 +70,13 @@ public:
 		, ts(other.ts)
 		, b_ts(other.b_ts)
 		, tk_ts(other.tk_ts)
+		, seq_length(other.seq_length)
 		, _tk_prob(other._tk_prob)
 		, _b_prob(other._b_prob)
 		, _intrm_score(other._intrm_score)
+		, _squash_prob(other._squash_prob)
 		, max_prob(other.max_prob)
-		, _max_prob(other.max_prob)
+		, _max_prob(other._max_prob)
 		, p_score(other.p_score)
 		, lm_prob(other.lm_prob)
 		, score(other.score)
@@ -96,10 +99,11 @@ public:
 
 	inline void acc_prob(T prob, std::vector<Node<T>*>& writer) noexcept;
 	inline void acc_tk_and_parent_prob(T prob, std::vector<Node<T>*>& writer) noexcept;
-	inline void update_score(float penalty, int curr_ts, const float beta) noexcept;
+	inline void update_score(float penalty, int curr_ts, const float beta,
+							 std::vector<Node<T>*>& more_confident_repeats);
 
 	Node<T>* extend_path(int id, int ts, T prob, const std::string token, std::vector<Node<T>*>& writer);
-	inline Node<T>* acc_repeat_token_prob(int ts, T prob, std::vector<Node<T>*>& writer) noexcept;
+	inline Node<T>* acc_repeat_token_prob(int ts, T prob, std::vector<Node<T>*>& writer);
 
 	// element-wise iterator for this class,
 	typename std::vector<Node<T>*>::iterator begin() noexcept { return this->childs.begin(); }
@@ -114,7 +118,8 @@ public:
 
 template <typename T>
 void
-zctc::Node<T>::update_score(float penalty, int curr_ts, const float beta) noexcept
+zctc::Node<T>::update_score(float penalty, int curr_ts, const float beta,
+							std::vector<zctc::Node<T>*>& more_confident_repeats)
 {
 	/*
 		In case, if a node encounters a blank and a repeat token
@@ -129,8 +134,29 @@ zctc::Node<T>::update_score(float penalty, int curr_ts, const float beta) noexce
 		return;
 
 	if (this->_max_prob > this->max_prob) {
-		this->max_prob = this->_max_prob;
-		this->ts = curr_ts;
+		Node<T>* node = new Node<T>(*this);
+		node->max_prob = node->_max_prob;
+		node->ts = curr_ts;
+		node->update_score(penalty, curr_ts, beta, more_confident_repeats);
+		more_confident_repeats.emplace_back(node);
+
+		/*
+		TODO: What if `_tk_prob` included the token's prob
+			  two times, like,
+				parent->curr_node : as duplicate
+				curr_node : as duplicate
+
+			One work around is, subtract the `log(_max_prob)` from
+			`_tk_prob` till it is <= `0`. If < `0`, then
+			there could possibly be a change in parent score,
+			which was included in the `_tk_prob`, so,
+			add `log(_max_prob)` to it once...
+		*/
+		this->_tk_prob -= this->_max_prob;
+		this->_max_prob = this->max_prob;
+		this->_squash_prob = zctc::ZERO;
+		// this->max_prob = this->_max_prob;
+		// this->ts = curr_ts;
 	}
 
 	/*
@@ -138,8 +164,12 @@ zctc::Node<T>::update_score(float penalty, int curr_ts, const float beta) noexce
 		linear scale, `p_score` and `score` will be in log scale,
 	*/
 	this->_intrm_score += std::log(this->_tk_prob + this->_b_prob);
-	this->score = this->p_score + this->_intrm_score;
+	if (this->_squash_prob != zctc::ZERO) {
+		this->_intrm_score = std::log(std::exp(this->_intrm_score) + this->_squash_prob);
+		this->_squash_prob = zctc::ZERO;
+	}
 
+	this->score = this->p_score + this->_intrm_score;
 	if (this->lm_prob != zctc::ZERO)
 		this->score = std::log(std::exp(this->score) + this->lm_prob);
 
@@ -154,6 +184,11 @@ zctc::Node<T>::update_score(float penalty, int curr_ts, const float beta) noexce
 		this->h_score = std::log(this->h_score);
 	}
 
+	if (this->_tk_prob != zctc::ZERO)
+		this->tk_ts = curr_ts;
+	if (this->_b_prob != zctc::ZERO)
+		this->b_ts = curr_ts;
+
 	this->_tk_prob = zctc::ZERO;
 	this->_b_prob = zctc::ZERO;
 	this->_update_required = false;
@@ -163,42 +198,69 @@ template <typename T>
 void
 zctc::Node<T>::acc_prob(T prob, std::vector<zctc::Node<T>*>& writer) noexcept
 {
-	zctc::Node<T>* node = this;
-	if (prob > this->_max_prob) {
-		node = new zctc::Node<T>(*this);
-		node->_max_prob = prob;
-	}
-	node->_tk_prob += prob;
-	node->_update_required = true;
+	/*
+	NOTE: Instead of creating a duplicate when we encounter a more
+		  confident repeat token, we'll just cache the most confident
+		  probability and then use that to create a new node on
+		  `update_score`, coz,
+					--> blank
+					|
+				a ---
+					|
+					--> a(but more confident)
 
-	writer.emplace_back(node);
+			the above case will be encountered as two different paths,
+
+			1. a -> blank
+			2. a -> (blank | a)
+
+			if we accept the token probability, we have to update the
+			timestep too, so, we'll just take the blank only for the
+			first path and won't consider the token probs,
+			and for the second path, we'll consider the token probs
+			as well as the blank probs.
+	*/
+	if (prob > this->_max_prob) {
+		this->_max_prob = prob;
+	}
+	this->_tk_prob += prob;
+	this->_update_required = true;
+
+	writer.emplace_back(this);
 }
 
 template <typename T>
 void
 zctc::Node<T>::acc_tk_and_parent_prob(T prob, std::vector<zctc::Node<T>*>& writer) noexcept
 {
-	zctc::Node<T>* node = this;
+	/*
+	NOTE: Please look at `acc_prob` functions comment to understand how we are handling
+		  duplicate but more confident token.
+	*/
 	if (prob > this->_max_prob) {
-		node = new zctc::Node<T>(*this);
-		node->_max_prob = prob;
+		this->_max_prob = prob;
 	}
 
-	node->_update_required = true;
-	writer.emplace_back(node);
+	this->_update_required = true;
+	writer.emplace_back(this);
 
-	if (node->parent->score == node->p_score) {
-		node->_tk_prob += prob;
+	if (this->parent->score == this->p_score) {
+		this->_tk_prob += prob;
 		return;
 	}
 
-	T diff_prob = node->p_score - node->parent->score;
-	node->_tk_prob += std::exp(diff_prob + std::log(prob));
+	/*
+	TODO: Evaluate this case, how can we accumulate the updated
+		  probs of parent to the child, as per the expression
+		  in the `update_score` function.
+	*/
+	T diff_prob = this->parent->score - this->p_score;
+	this->_squash_prob += std::exp(diff_prob + std::log(prob));
 }
 
 template <typename T>
 zctc::Node<T>*
-zctc::Node<T>::acc_repeat_token_prob(int ts, T prob, std::vector<zctc::Node<T>*>& writer) noexcept
+zctc::Node<T>::acc_repeat_token_prob(int ts, T prob, std::vector<zctc::Node<T>*>& writer)
 {
 	/*
 		In case, if the token is the most recent than the blank, or,
