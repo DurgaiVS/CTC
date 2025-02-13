@@ -32,7 +32,7 @@ debug_decoder()
 
 	char tok_sep = '#';
 	int iter_count, blank_id, seq_len = 1000, thread_count = 1, cutoff_top_n = 40;
-	float nucleus_prob_per_timestep = 1.0, penalty = -5.0, alpha = 0.017, beta = 1.02;
+	float nucleus_prob_per_timestep = 1.0, penalty = -5.0, alpha = 0.017, beta = 0;
 	std::size_t beam_width = 250;
 	std::string lm_path, lexicon_path, vocab_path;
 	std::vector<std::string> vocab;
@@ -99,7 +99,7 @@ debug_decoder_with_constants()
 
 	char tok_sep = '#';
 	int blank_id = 0, thread_count = 1, cutoff_top_n = 40;
-	float nucleus_prob_per_timestep = 1.0, penalty = -5.0, alpha = 0.17, beta = -0.24;
+	float nucleus_prob_per_timestep = 1.0, penalty = -5.0, alpha = 0.17, beta = 0;
 	std::size_t beam_width = 281;
 	std::string lm_path, lexicon_path, vocab_path;
 	std::vector<std::string> vocab;
@@ -132,14 +132,22 @@ debug_decoder_with_constants()
 						 [&logits, &temp](int a, int b) { return logits[temp + a] > logits[temp + b]; });
 	}
 
+	for (int i = 0, j = 0; i < defaults::seq_len; i++) {
+		j = i * decoder.vocab_size;
+		if (sorted_indices[j] == 0)
+			continue;
+		std::cout << i << " : " << sorted_indices[j] << ", " << sorted_indices[j + 1] << ", " << sorted_indices[j + 2]
+				  << std::endl;
+	}
+
 	zctc::decode<float>(&decoder, logits.data(), sorted_indices.data(), labels.data(), timesteps.data(),
 						defaults::seq_len, seq_pos.data(), nullptr);
 
-	for (int i = 0; i < decoder.beam_width; i++) {
-		for (int j = 0; j < defaults::seq_len; j++) {
-			std::cout << labels[i * defaults::seq_len + j] << " ";
-		}
-		std::cout << std::endl;
+	/*
+	NOTE: Only printing the first beam labels.
+	*/
+	for (int j = seq_pos[0]; j < defaults::seq_len; j++) {
+		std::cout << labels[j] << ":" << timesteps[j] << " ";
 	}
 }
 
@@ -149,7 +157,7 @@ debug_decoder_with_toy_exp()
 
 	char tok_sep = '#';
 	int blank_id = 0, seq_len = 2, thread_count = 1, cutoff_top_n = 3;
-	float nucleus_prob_per_timestep = 1.0, penalty = -5.0, alpha = 0.017, beta = -1.02;
+	float nucleus_prob_per_timestep = 1.0, penalty = -5.0, alpha = 0.017, beta = 0;
 	std::size_t beam_width = 9;
 	std::vector<std::string> vocab = { "_", "'", "b" };
 
@@ -175,7 +183,7 @@ debug_decoder_with_toy_exp()
 
 	for (int i = 0; i < decoder.beam_width; i++) {
 		for (int j = 0; j < seq_len; j++) {
-			std::cout << labels[i * seq_len + j] << " ";
+			std::cout << labels[i * seq_len + j] << ":" << timesteps[i * seq_len + j] << " ";
 		}
 		std::cout << std::endl;
 	}

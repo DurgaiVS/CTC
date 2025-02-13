@@ -18,7 +18,7 @@ class Node {
 public:
 	bool is_lex_path, is_start_of_word, is_hotpath, _update_required;
 	int hotword_length, ts, b_ts, tk_ts, seq_length;
-	T _tk_prob, _b_prob, _intrm_score, _squash_prob;
+	T _tk_prob, _b_prob, _intrm_score, _squash_prob, _confident_prob;
 	T max_prob, _max_prob, p_score, lm_prob, score, h_score, hotword_weight;
 	const int id;
 	const std::string token;
@@ -40,6 +40,7 @@ public:
 		, _b_prob(zctc::ZERO)
 		, _intrm_score(zctc::ZERO)
 		, _squash_prob(zctc::ZERO)
+		, _confident_prob(zctc::ZERO)
 		, max_prob(prob)
 		, _max_prob(prob)
 		, p_score(zctc::ZERO)
@@ -75,6 +76,7 @@ public:
 		, _b_prob(other._b_prob)
 		, _intrm_score(other._intrm_score)
 		, _squash_prob(other._squash_prob)
+		, _confident_prob(other._confident_prob)
 		, max_prob(other.max_prob)
 		, _max_prob(other._max_prob)
 		, p_score(other.p_score)
@@ -135,10 +137,13 @@ zctc::Node<T>::update_score(float penalty, int curr_ts, const float beta,
 
 	if (this->_max_prob > this->max_prob) {
 		Node<T>* node = new Node<T>(*this);
+		more_confident_repeats.emplace_back(node);
+
 		node->max_prob = node->_max_prob;
 		node->ts = curr_ts;
+		node->_tk_prob = node->_confident_prob;
+		node->_confident_prob = zctc::ZERO;
 		node->update_score(penalty, curr_ts, beta, more_confident_repeats);
-		more_confident_repeats.emplace_back(node);
 
 		/*
 		TODO: What if `_tk_prob` included the token's prob
@@ -152,7 +157,6 @@ zctc::Node<T>::update_score(float penalty, int curr_ts, const float beta,
 			which was included in the `_tk_prob`, so,
 			add `log(_max_prob)` to it once...
 		*/
-		this->_tk_prob -= this->_max_prob;
 		this->_max_prob = this->max_prob;
 		this->_squash_prob = zctc::ZERO;
 		// this->max_prob = this->_max_prob;
@@ -201,8 +205,9 @@ zctc::Node<T>::acc_prob(T prob, std::vector<zctc::Node<T>*>& writer) noexcept
 	/*
 	NOTE: Instead of creating a duplicate when we encounter a more
 		  confident repeat token, we'll just cache the most confident
-		  probability and then use that to create a new node on
-		  `update_score`, coz,
+		  probability in `_confident_prob` and when creating new node
+		  due to confidence timestep update, we'll consider this probs,
+
 					--> blank
 					|
 				a ---
@@ -220,33 +225,40 @@ zctc::Node<T>::acc_prob(T prob, std::vector<zctc::Node<T>*>& writer) noexcept
 			and for the second path, we'll consider the token probs
 			as well as the blank probs.
 	*/
-	if (prob > this->_max_prob) {
-		this->_max_prob = prob;
-	}
-	this->_tk_prob += prob;
 	this->_update_required = true;
-
 	writer.emplace_back(this);
+
+	if (prob > this->max_prob) {
+		this->_confident_prob += prob;
+		this->_max_prob = prob;
+	} else {
+		this->_tk_prob += prob;
+	}
 }
 
 template <typename T>
 void
 zctc::Node<T>::acc_tk_and_parent_prob(T prob, std::vector<zctc::Node<T>*>& writer) noexcept
 {
+	this->_update_required = true;
+	writer.emplace_back(this);
 	/*
 	NOTE: Please look at `acc_prob` functions comment to understand how we are handling
 		  duplicate but more confident token.
 	*/
-	if (prob > this->_max_prob) {
-		this->_max_prob = prob;
-	}
-
-	this->_update_required = true;
-	writer.emplace_back(this);
 
 	if (this->parent->score == this->p_score) {
-		this->_tk_prob += prob;
+		if (prob > this->max_prob) {
+			this->_confident_prob += prob;
+			this->_max_prob = prob;
+		} else {
+			this->_tk_prob += prob;
+		}
 		return;
+	}
+
+	if (prob > this->max_prob) {
+		this->_max_prob = prob;
 	}
 
 	/*

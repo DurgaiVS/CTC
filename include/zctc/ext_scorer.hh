@@ -111,16 +111,16 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* node, fst::SortedMatcher<fs
 			  as it is.
 		*/
 
-		if (word_id == this->lm->BaseVocabulary().NotFound()) { // OOV char
-			node->lm_prob = -100;
-		} else {
-			/*
-			NOTE: Since KenLM returns the log probability with base 10,
-				  convert the log probability to linear scale.
-			*/
-			node->lm_prob = std::pow(
-				10.0f, this->alpha + this->lm->BaseScore(&(node->parent->lm_state), word_id, &(node->lm_state)));
-		}
+		// if (word_id == this->lm->BaseVocabulary().NotFound()) { // OOV char
+		// 	node->lm_prob = -100;
+		// } else {
+		/*
+		NOTE: Since KenLM returns the log probability with base 10,
+			  convert the log probability to linear scale.
+		*/
+		node->lm_prob
+			= std::pow(10.0f, this->alpha + this->lm->BaseScore(&(node->parent->lm_state), word_id, &(node->lm_state)));
+		// }
 	}
 
 	this->start_of_word_check(node, hotwords_fst);

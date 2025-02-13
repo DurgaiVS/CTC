@@ -56,9 +56,9 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 	   fst::StdVectorFst* hotwords_fst)
 {
 
-	bool is_blank;
+	bool is_blank, full_beam;
 	int iter_val, pos_val;
-	T nucleus_max, nucleus_count, prob;
+	T nucleus_max, nucleus_count, prob, min_prob_acc;
 	int *curr_id, *curr_l, *curr_t, *curr_p;
 	zctc::Node<T>* child;
 	std::vector<int> duplicte_ids;
@@ -81,10 +81,13 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 		// to avoid cleaning and copying the elements.
 		std::vector<zctc::Node<T>*>& reader = ((timestep % 2) == 0 ? prefixes0 : prefixes1);
 		std::vector<zctc::Node<T>*>& writer = ((timestep % 2) == 0 ? prefixes1 : prefixes0);
+		std::sort(reader.begin(), reader.end(), Decoder::descending_compare<T>);
 
 		nucleus_count = 0;
 		iter_val = timestep * decoder->vocab_size;
 		curr_id = ids + iter_val;
+		full_beam = reader.size() == decoder->beam_width;
+		min_prob_acc = reader.back()->h_score + std::log(logits[iter_val + decoder->blank_id]) - 0.3;
 
 		for (int i = 0, index = 0; i < decoder->cutoff_top_n; i++, curr_id++) {
 			index = *curr_id;
@@ -107,6 +110,8 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 			}
 
 			for (zctc::Node<T>* r_node : reader) {
+				if (full_beam && (r_node->h_score + std::log(prob)) < min_prob_acc)
+					continue;
 				// Check if the index is repeat or not and
 				// update the node accordingly
 				child = r_node->extend_path(index, timestep, prob, decoder->vocab[index], writer);
