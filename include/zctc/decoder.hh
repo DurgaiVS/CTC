@@ -20,14 +20,15 @@ public:
 	static bool descending_compare(zctc::Node<T>* x, zctc::Node<T>* y);
 
 	const int thread_count, blank_id, cutoff_top_n, vocab_size;
-	const float beta, nucleus_prob_per_timestep, penalty;
+	const float beta, nucleus_prob_per_timestep, penalty, min_tok_prob, max_beam_score_deviation;
 	const std::size_t beam_width;
 	const std::vector<std::string> vocab;
 	const ExternalScorer ext_scorer;
 
 	Decoder(int thread_count, int blank_id, int cutoff_top_n, int apostrophe_id, float nucleus_prob_per_timestep,
-			float alpha, float beta, std::size_t beam_width, float penalty, char tok_sep,
-			std::vector<std::string> vocab, char* lm_path, char* lexicon_path)
+			float alpha, float beta, std::size_t beam_width, float penalty, float min_tok_prob,
+			float max_beam_score_deviation, char tok_sep, std::vector<std::string> vocab, char* lm_path,
+			char* lexicon_path)
 		: thread_count(thread_count)
 		, blank_id(blank_id)
 		, cutoff_top_n(cutoff_top_n)
@@ -35,6 +36,8 @@ public:
 		, beta(beta)
 		, nucleus_prob_per_timestep(nucleus_prob_per_timestep)
 		, penalty(penalty)
+		, min_tok_prob(std::exp(min_tok_prob))
+		, max_beam_score_deviation(std::exp(max_beam_score_deviation))
 		, beam_width(beam_width)
 		, vocab(vocab)
 		// NOTE: KenLM uses log base 10
@@ -52,16 +55,16 @@ public:
 
 template <typename T>
 int
-decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, const int seq_len, int* seq_pos,
-	   fst::StdVectorFst* hotwords_fst)
+decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, const int seq_len, const int max_seq_len,
+	   int* seq_pos, fst::StdVectorFst* hotwords_fst)
 {
 
 	bool is_blank, full_beam;
 	int iter_val, pos_val;
-	T nucleus_max, nucleus_count, prob, min_prob_acc;
+	T nucleus_max, nucleus_count, prob, max_beam_score, beam_score;
 	int *curr_id, *curr_l, *curr_t, *curr_p;
 	zctc::Node<T>* child;
-	std::vector<int> duplicte_ids;
+	std::vector<int> writer_remove_ids;
 	std::vector<zctc::Node<T>*> prefixes0, prefixes1, more_confident_repeats;
 	zctc::Node<T> root(zctc::ROOT_ID, -1, static_cast<T>(zctc::ZERO), "<s>", nullptr);
 	fst::SortedMatcher<fst::StdVectorFst> lexicon_matcher(decoder->ext_scorer.lexicon, fst::MATCH_INPUT);
@@ -81,17 +84,17 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 		// to avoid cleaning and copying the elements.
 		std::vector<zctc::Node<T>*>& reader = ((timestep % 2) == 0 ? prefixes0 : prefixes1);
 		std::vector<zctc::Node<T>*>& writer = ((timestep % 2) == 0 ? prefixes1 : prefixes0);
-		std::sort(reader.begin(), reader.end(), Decoder::descending_compare<T>);
 
 		nucleus_count = 0;
 		iter_val = timestep * decoder->vocab_size;
 		curr_id = ids + iter_val;
-		full_beam = reader.size() == decoder->beam_width;
-		min_prob_acc = reader.back()->h_score + std::log(logits[iter_val + decoder->blank_id]) - 0.3;
 
 		for (int i = 0, index = 0; i < decoder->cutoff_top_n; i++, curr_id++) {
 			index = *curr_id;
 			prob = logits[iter_val + index];
+
+			if (prob < decoder->min_tok_prob)
+				continue;
 
 			is_blank = index == decoder->blank_id;
 			nucleus_count += prob;
@@ -110,8 +113,6 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 			}
 
 			for (zctc::Node<T>* r_node : reader) {
-				if (full_beam && (r_node->h_score + std::log(prob)) < min_prob_acc)
-					continue;
 				// Check if the index is repeat or not and
 				// update the node accordingly
 				child = r_node->extend_path(index, timestep, prob, decoder->vocab[index], writer);
@@ -132,19 +133,22 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 				break;
 		}
 
-		pos_val = 0;
+		pos_val = -1;
+		max_beam_score = std::numeric_limits<T>::lowest();
 		for (zctc::Node<T>* w_node : writer) {
 			/*
 			update total score for the node,
 			considering probs, LM probs, OOV penalty
 			recently updated token and blank probs
 			*/
+			pos_val++;
 
 			if (!w_node->_update_required) {
-				duplicte_ids.emplace_back(pos_val);
+				writer_remove_ids.emplace_back(pos_val);
+				continue;
 			}
-			pos_val++;
-			w_node->update_score(decoder->penalty, timestep, decoder->beta, more_confident_repeats);
+
+			beam_score = w_node->update_score(decoder->penalty, timestep, decoder->beta, more_confident_repeats);
 			/*
 			NOTE: Doing the update step here, to avoid
 				  the current timestep's repeat token prob
@@ -161,21 +165,41 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 				-->        b -  (In this case, a new node is created and the path is extended.)
 
 			*/
+			if (beam_score > max_beam_score)
+				max_beam_score = beam_score;
 		}
 
 		pos_val = 0;
-		for (int pos : duplicte_ids) {
+		for (int pos : writer_remove_ids) {
 			writer.erase(writer.begin() + pos - pos_val);
 			pos_val++;
 		}
 		for (zctc::Node<T>* repeat_node : more_confident_repeats) {
 			writer.emplace_back(repeat_node);
 		}
-
 		more_confident_repeats.clear();
-		duplicte_ids.clear();
+		writer_remove_ids.clear();
+
 		reader.clear();
-		if (writer.size() < decoder->beam_width)
+		if (writer.size() <= decoder->beam_width)
+			continue;
+
+		pos_val = 0;
+		beam_score = std::log(std::exp(max_beam_score) - decoder->max_beam_score_deviation);
+		for (zctc::Node<T>* w_node : writer) {
+			if (w_node->h_score < beam_score)
+				writer_remove_ids.emplace_back(pos_val);
+
+			pos_val++;
+		}
+		pos_val = 0;
+		for (int pos : writer_remove_ids) {
+			writer.erase(writer.begin() + pos - pos_val);
+			pos_val++;
+		}
+		writer_remove_ids.clear();
+
+		if (writer.size() <= decoder->beam_width)
 			continue;
 
 		std::nth_element(writer.begin(), writer.begin() + decoder->beam_width, writer.end(),
@@ -190,9 +214,9 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 	curr_p = seq_pos;
 	for (zctc::Node<T>* r_node : reader) {
 
-		curr_t = timestep + ((seq_len * iter_val) - 1);
-		curr_l = label + ((seq_len * iter_val) - 1);
-		pos_val = seq_len;
+		curr_t = timestep + ((max_seq_len * iter_val) - 1);
+		curr_l = label + ((max_seq_len * iter_val) - 1);
+		pos_val = max_seq_len;
 
 		while (r_node->id != zctc::ROOT_ID) {
 
@@ -267,7 +291,7 @@ zctc::Decoder::batch_decode(py::array_t<T>& batch_log_logits, py::array_t<int>& 
 		s_p = i * this->beam_width;
 
 		results.emplace_back(pool.enqueue(zctc::decode<T>, this, logits + ip_pos, ids + ip_pos, labels + op_pos,
-										  timesteps + op_pos, *(seq_len + i), seq_pos + s_p,
+										  timesteps + op_pos, *(seq_len + i), max_seq_len, seq_pos + s_p,
 										  (hotwords.empty() ? nullptr : &hotwords_fst)));
 	}
 

@@ -33,6 +33,7 @@ debug_decoder()
 	char tok_sep = '#';
 	int iter_count, blank_id, seq_len = 1000, thread_count = 1, cutoff_top_n = 40;
 	float nucleus_prob_per_timestep = 1.0, penalty = -5.0, alpha = 0.017, beta = 0;
+	float min_tok_prob = -5.0, max_beam_deviation = -10.0;
 	std::size_t beam_width = 250;
 	std::string lm_path, lexicon_path, vocab_path;
 	std::vector<std::string> vocab;
@@ -51,7 +52,8 @@ debug_decoder()
 	int apostrophe_id = load_vocab(vocab, vocab_path.c_str());
 
 	zctc::Decoder decoder(thread_count, blank_id, cutoff_top_n, apostrophe_id, nucleus_prob_per_timestep, alpha, beta,
-						  beam_width, penalty, tok_sep, vocab, lm_path.data(), lexicon_path.data());
+						  beam_width, penalty, min_tok_prob, max_beam_deviation, tok_sep, vocab, lm_path.data(),
+						  lexicon_path.data());
 
 	std::vector<float> logits(decoder.vocab_size * seq_len);
 	std::vector<int> sorted_indices(decoder.vocab_size * seq_len);
@@ -83,7 +85,7 @@ debug_decoder()
 		}
 
 		zctc::decode<float>(&decoder, logits.data(), sorted_indices.data(), labels.data(), timesteps.data(), seq_len,
-							seq_pos.data(), &hotwords_fst);
+							seq_len, seq_pos.data(), &hotwords_fst);
 
 		std::fill(labels.begin(), labels.end(), 0);
 		std::fill(timesteps.begin(), timesteps.end(), 0);
@@ -100,14 +102,12 @@ debug_decoder_with_constants()
 	char tok_sep = '#';
 	int blank_id = 0, thread_count = 1, cutoff_top_n = 40;
 	float nucleus_prob_per_timestep = 1.0, penalty = -5.0, alpha = 0.17, beta = 0;
+	float min_tok_prob = -5.0, max_beam_deviation = -10.0;
+
 	std::size_t beam_width = 281;
-	std::string lm_path, lexicon_path, vocab_path;
+	std::string vocab_path;
 	std::vector<std::string> vocab;
 
-	std::cout << "Enter lm path: ";
-	std::cin >> lm_path;
-	std::cout << "Enter lexicon path: ";
-	std::cin >> lexicon_path;
 	std::cout << "Enter vocab path: ";
 	std::cin >> vocab_path;
 	std::cout << "Enter blank id: ";
@@ -116,7 +116,7 @@ debug_decoder_with_constants()
 	int apostrophe_id = load_vocab(vocab, vocab_path.c_str());
 
 	zctc::Decoder decoder(thread_count, blank_id, cutoff_top_n, apostrophe_id, nucleus_prob_per_timestep, alpha, beta,
-						  beam_width, penalty, tok_sep, vocab, nullptr, nullptr);
+						  beam_width, penalty, min_tok_prob, max_beam_deviation, tok_sep, vocab, nullptr, nullptr);
 
 	std::vector<float>& logits = defaults::logits;
 	std::vector<int> sorted_indices(decoder.vocab_size * defaults::seq_len);
@@ -141,7 +141,7 @@ debug_decoder_with_constants()
 	}
 
 	zctc::decode<float>(&decoder, logits.data(), sorted_indices.data(), labels.data(), timesteps.data(),
-						defaults::seq_len, seq_pos.data(), nullptr);
+						defaults::seq_len, defaults::seq_len, seq_pos.data(), nullptr);
 
 	/*
 	NOTE: Only printing the first beam labels.
@@ -158,11 +158,12 @@ debug_decoder_with_toy_exp()
 	char tok_sep = '#';
 	int blank_id = 0, seq_len = 2, thread_count = 1, cutoff_top_n = 3;
 	float nucleus_prob_per_timestep = 1.0, penalty = -5.0, alpha = 0.017, beta = 0;
+	float min_tok_prob = -5.0, max_beam_deviation = -10.0;
 	std::size_t beam_width = 9;
 	std::vector<std::string> vocab = { "_", "'", "b" };
 
 	zctc::Decoder decoder(thread_count, blank_id, cutoff_top_n, 1, nucleus_prob_per_timestep, alpha, beta, beam_width,
-						  penalty, tok_sep, vocab, nullptr, nullptr);
+						  penalty, min_tok_prob, max_beam_deviation, tok_sep, vocab, nullptr, nullptr);
 
 	std::vector<float> logits = { 0.6, 0.3, 0.1, 0.6, 0.35, 0.05 };
 	std::vector<int> sorted_indices(decoder.vocab_size * seq_len);
@@ -179,7 +180,7 @@ debug_decoder_with_toy_exp()
 	}
 
 	zctc::decode<float>(&decoder, logits.data(), sorted_indices.data(), labels.data(), timesteps.data(), seq_len,
-						seq_pos.data(), nullptr);
+						seq_len, seq_pos.data(), nullptr);
 
 	for (int i = 0; i < decoder.beam_width; i++) {
 		for (int j = 0; j < seq_len; j++) {

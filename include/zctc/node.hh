@@ -101,8 +101,7 @@ public:
 
 	inline void acc_prob(T prob, std::vector<Node<T>*>& writer) noexcept;
 	inline void acc_tk_and_parent_prob(T prob, std::vector<Node<T>*>& writer) noexcept;
-	inline void update_score(float penalty, int curr_ts, const float beta,
-							 std::vector<Node<T>*>& more_confident_repeats);
+	T update_score(float penalty, int curr_ts, const float beta, std::vector<Node<T>*>& more_confident_repeats);
 
 	Node<T>* extend_path(int id, int ts, T prob, const std::string token, std::vector<Node<T>*>& writer);
 	inline Node<T>* acc_repeat_token_prob(int ts, T prob, std::vector<Node<T>*>& writer);
@@ -119,7 +118,7 @@ public:
 /* ---------------------------------------------------------------------------- */
 
 template <typename T>
-void
+T
 zctc::Node<T>::update_score(float penalty, int curr_ts, const float beta,
 							std::vector<zctc::Node<T>*>& more_confident_repeats)
 {
@@ -133,7 +132,7 @@ zctc::Node<T>::update_score(float penalty, int curr_ts, const float beta,
 		we are going with this approach.
 	*/
 	if (!this->_update_required)
-		return;
+		return this->h_score;
 
 	if (this->_max_prob > this->max_prob) {
 		Node<T>* node = new Node<T>(*this);
@@ -196,6 +195,8 @@ zctc::Node<T>::update_score(float penalty, int curr_ts, const float beta,
 	this->_tk_prob = zctc::ZERO;
 	this->_b_prob = zctc::ZERO;
 	this->_update_required = false;
+
+	return this->h_score;
 }
 
 template <typename T>
