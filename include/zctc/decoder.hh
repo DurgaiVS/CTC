@@ -37,11 +37,11 @@ public:
 		, nucleus_prob_per_timestep(nucleus_prob_per_timestep)
 		, penalty(penalty)
 		, min_tok_prob(std::exp(min_tok_prob))
-		, max_beam_score_deviation(std::exp(max_beam_score_deviation))
+		, max_beam_score_deviation(max_beam_score_deviation)
 		, beam_width(beam_width)
 		, vocab(vocab)
 		// NOTE: KenLM uses log base 10
-		, ext_scorer(tok_sep, apostrophe_id, std::log10(alpha), penalty, lm_path, lexicon_path)
+		, ext_scorer(tok_sep, apostrophe_id, alpha, penalty, lm_path, lexicon_path)
 	{
 	}
 
@@ -52,6 +52,30 @@ public:
 					  const int max_seq_len, std::vector<std::vector<int>>& hotwords,
 					  std::vector<float>& hotwords_weight) const;
 };
+
+template <typename T>
+inline void
+remove_from_source(std::vector<zctc::Node<T>*>& source, std::vector<int>& remove_ids)
+{
+	zctc::Node<T>** src_end = source.data() + (source.size() - 1);
+	zctc::Node<T>** src_begin = source.data();
+	zctc::Node<T>** intrm_val;
+	zctc::Node<T>* dummy;
+	int* rm_id = remove_ids.data() + (remove_ids.size() - 1);
+
+	for (int id = 0; id < remove_ids.size(); id++) {
+		dummy = *src_end;
+		intrm_val = src_begin + (*rm_id);
+		*src_end = *intrm_val;
+		*intrm_val = dummy;
+
+		rm_id--;
+		src_end--;
+	}
+
+	source.erase(source.end() - remove_ids.size(), source.end());
+	remove_ids.clear();
+}
 
 template <typename T>
 int
@@ -75,8 +99,8 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 
 	// For performance reasons, we initialise and reserve memory
 	// for the prefixes
-	prefixes0.reserve(decoder->cutoff_top_n * decoder->beam_width);
-	prefixes1.reserve(decoder->cutoff_top_n * decoder->beam_width);
+	prefixes0.reserve(std::min(8, decoder->cutoff_top_n) * decoder->beam_width);
+	prefixes1.reserve(std::min(8, decoder->cutoff_top_n) * decoder->beam_width);
 	prefixes0.emplace_back(&root);
 
 	for (int timestep = 0; timestep < seq_len; timestep++) {
@@ -169,35 +193,25 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 				max_beam_score = beam_score;
 		}
 
-		pos_val = 0;
-		for (int pos : writer_remove_ids) {
-			writer.erase(writer.begin() + pos - pos_val);
-			pos_val++;
-		}
+		remove_from_source(writer, writer_remove_ids);
 		for (zctc::Node<T>* repeat_node : more_confident_repeats) {
 			writer.emplace_back(repeat_node);
 		}
 		more_confident_repeats.clear();
-		writer_remove_ids.clear();
 
 		reader.clear();
 		if (writer.size() <= decoder->beam_width)
 			continue;
 
 		pos_val = 0;
-		beam_score = std::log(std::exp(max_beam_score) - decoder->max_beam_score_deviation);
+		beam_score = max_beam_score + decoder->max_beam_score_deviation;
 		for (zctc::Node<T>* w_node : writer) {
 			if (w_node->h_score < beam_score)
 				writer_remove_ids.emplace_back(pos_val);
 
 			pos_val++;
 		}
-		pos_val = 0;
-		for (int pos : writer_remove_ids) {
-			writer.erase(writer.begin() + pos - pos_val);
-			pos_val++;
-		}
-		writer_remove_ids.clear();
+		remove_from_source(writer, writer_remove_ids);
 
 		if (writer.size() <= decoder->beam_width)
 			continue;

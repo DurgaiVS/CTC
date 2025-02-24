@@ -117,9 +117,11 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* node, fst::SortedMatcher<fs
 		/*
 		NOTE: Since KenLM returns the log probability with base 10,
 			  convert the log probability to linear scale.
+
+			  logb(x) = loga(x) / loga(b)
 		*/
 		node->lm_prob
-			= std::pow(10.0f, this->alpha + this->lm->BaseScore(&(node->parent->lm_state), word_id, &(node->lm_state)));
+			= std::pow(10.0f, this->alpha * this->lm->BaseScore(&(node->parent->lm_state), word_id, &(node->lm_state)));
 		// }
 	}
 

@@ -179,21 +179,21 @@ zctc::Node<T>::update_score(float penalty, int curr_ts, const float beta,
 	if (!this->is_lex_path)
 		this->score += penalty;
 
-	this->h_score = std::exp(this->score) + (beta * this->seq_length);
+	this->h_score = this->score + (beta * this->seq_length);
 
 	if (this->is_hotpath) {
-		this->h_score = std::log(this->h_score + (this->hotword_length * this->hotword_weight));
-	} else {
-		this->h_score = std::log(this->h_score);
+		this->h_score = this->h_score + (this->hotword_length * this->hotword_weight);
 	}
 
-	if (this->_tk_prob != zctc::ZERO)
+	if (this->_tk_prob != zctc::ZERO) {
 		this->tk_ts = curr_ts;
-	if (this->_b_prob != zctc::ZERO)
+		this->_tk_prob = zctc::ZERO;
+	}
+	if (this->_b_prob != zctc::ZERO) {
 		this->b_ts = curr_ts;
+		this->_b_prob = zctc::ZERO;
+	}
 
-	this->_tk_prob = zctc::ZERO;
-	this->_b_prob = zctc::ZERO;
 	this->_update_required = false;
 
 	return this->h_score;
