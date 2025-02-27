@@ -173,13 +173,10 @@ zctc::Node<T>::update_score(float penalty, int curr_ts, const float beta,
 	}
 
 	this->score = this->p_score + this->_intrm_score;
-	if (this->lm_prob != zctc::ZERO)
-		this->score = std::log(std::exp(this->score) + this->lm_prob);
-
 	if (!this->is_lex_path)
 		this->score += penalty;
 
-	this->h_score = this->score + (beta * this->seq_length);
+	this->h_score = this->score + this->lm_prob + (beta * this->seq_length);
 
 	if (this->is_hotpath) {
 		this->h_score = this->h_score + (this->hotword_length * this->hotword_weight);
