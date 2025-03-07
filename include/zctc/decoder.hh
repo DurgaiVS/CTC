@@ -99,8 +99,8 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 
 	// For performance reasons, we initialise and reserve memory
 	// for the prefixes
-	prefixes0.reserve(std::min(8, decoder->cutoff_top_n) * decoder->beam_width);
-	prefixes1.reserve(std::min(8, decoder->cutoff_top_n) * decoder->beam_width);
+	prefixes0.reserve(3 * decoder->beam_width);
+	prefixes1.reserve(3 * decoder->beam_width);
 	prefixes0.emplace_back(&root);
 
 	for (int timestep = 0; timestep < seq_len; timestep++) {
@@ -118,7 +118,7 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 			prob = logits[iter_val + index];
 
 			if (prob < decoder->min_tok_prob)
-				continue;
+				break;
 
 			is_blank = index == decoder->blank_id;
 			nucleus_count += prob;
@@ -129,8 +129,10 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 				// in case of blank.
 				for (zctc::Node<T>* r_node : reader) {
 					r_node->_b_prob += prob;
-					r_node->_update_required = true;
-					writer.emplace_back(r_node);
+					if (!r_node->_is_at_writer) {
+						writer.emplace_back(r_node);
+						r_node->_is_at_writer = true;
+					}
 				}
 
 				continue;
@@ -167,12 +169,12 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 			*/
 			pos_val++;
 
-			if (!w_node->_update_required) {
+			beam_score = w_node->update_score(decoder->penalty, timestep, decoder->beta, more_confident_repeats);
+
+			if (w_node->_confident_prob != zctc::ZERO) {
 				writer_remove_ids.emplace_back(pos_val);
 				continue;
 			}
-
-			beam_score = w_node->update_score(decoder->penalty, timestep, decoder->beta, more_confident_repeats);
 			/*
 			NOTE: Doing the update step here, to avoid
 				  the current timestep's repeat token prob

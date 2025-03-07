@@ -72,7 +72,7 @@ class CTCDecoder(_Decoder):
 #sort in ascending based on token length...
 
         sorted_indices = (
-            torch.argsort(logits, dim=2, descending=True).to("cpu", torch.int32).numpy()
+            torch.argsort(logits, dim=2, descending=True).detach().to("cpu", torch.int32).numpy()
         )
         labels = torch.zeros((batch_size, self.beam_width, seq_len), dtype=torch.int32)
         timesteps = torch.zeros(
@@ -81,11 +81,11 @@ class CTCDecoder(_Decoder):
         seq_pos = torch.zeros((batch_size, self.beam_width), dtype=torch.int32)
 
         self.batch_decode(
-            logits.cpu().numpy(),
+            logits.detach().cpu().numpy(),
             sorted_indices,
             labels.numpy(),
             timesteps.numpy(),
-            seq_lens.to("cpu", torch.int32).numpy(),
+            seq_lens.detach().to("cpu", torch.int32).numpy(),
             seq_pos.numpy(),
             batch_size,
             seq_len,

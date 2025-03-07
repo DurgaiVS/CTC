@@ -16,7 +16,7 @@ namespace zctc {
 template <typename T>
 class Node {
 public:
-	bool is_lex_path, is_start_of_word, is_hotpath, _update_required;
+	bool is_lex_path, is_start_of_word, is_hotpath, _is_at_writer;
 	int hotword_length, ts, b_ts, tk_ts, seq_length;
 	T _tk_prob, _b_prob, _intrm_score, _squash_prob, _confident_prob;
 	T max_prob, _max_prob, p_score, lm_prob, score, h_score, hotword_weight;
@@ -31,7 +31,7 @@ public:
 		: is_lex_path(true)
 		, is_start_of_word(false)
 		, is_hotpath(false)
-		, _update_required(true)
+		, _is_at_writer(false)
 		, hotword_length(0)
 		, ts(ts)
 		, b_ts(-1)
@@ -66,7 +66,7 @@ public:
 		: is_lex_path(other.is_lex_path)
 		, is_start_of_word(other.is_start_of_word)
 		, is_hotpath(other.is_hotpath)
-		, _update_required(other._update_required)
+		, _is_at_writer(false)
 		, hotword_length(other.hotword_length)
 		, ts(other.ts)
 		, b_ts(other.b_ts)
@@ -131,9 +131,6 @@ zctc::Node<T>::update_score(float penalty, int curr_ts, const float beta,
 		To avoid a check when inserting the nodes into the writer,
 		we are going with this approach.
 	*/
-	if (!this->_update_required)
-		return this->h_score;
-
 	if (this->_max_prob > this->max_prob) {
 		Node<T>* node = new Node<T>(*this);
 		more_confident_repeats.emplace_back(node);
@@ -142,7 +139,12 @@ zctc::Node<T>::update_score(float penalty, int curr_ts, const float beta,
 		node->ts = curr_ts;
 		node->_tk_prob = node->_confident_prob;
 		node->_confident_prob = zctc::ZERO;
-		node->update_score(penalty, curr_ts, beta, more_confident_repeats);
+
+		this->_max_prob = this->max_prob;
+		this->_squash_prob = zctc::ZERO;
+		this->_is_at_writer = false;
+
+		return node->update_score(penalty, curr_ts, beta, more_confident_repeats);
 
 		/*
 		TODO: What if `_tk_prob` included the token's prob
@@ -156,8 +158,7 @@ zctc::Node<T>::update_score(float penalty, int curr_ts, const float beta,
 			which was included in the `_tk_prob`, so,
 			add `log(_max_prob)` to it once...
 		*/
-		this->_max_prob = this->max_prob;
-		this->_squash_prob = zctc::ZERO;
+
 		// this->max_prob = this->_max_prob;
 		// this->ts = curr_ts;
 	}
@@ -191,8 +192,7 @@ zctc::Node<T>::update_score(float penalty, int curr_ts, const float beta,
 		this->_b_prob = zctc::ZERO;
 	}
 
-	this->_update_required = false;
-
+	this->_is_at_writer = false;
 	return this->h_score;
 }
 
@@ -206,25 +206,28 @@ zctc::Node<T>::acc_prob(T prob, std::vector<zctc::Node<T>*>& writer) noexcept
 		  probability in `_confident_prob` and when creating new node
 		  due to confidence timestep update, we'll consider this probs,
 
-					--> blank
-					|
-				a ---
-					|
-					--> a(but more confident)
+						--> blank
+						|
+			parent --->	a ---> some other tokens
+						|
+						--> a(but more confident)
 
 			the above case will be encountered as two different paths,
 
-			1. a -> blank
+			1. a -> some childs
 			2. a -> (blank | a)
 
 			if we accept the token probability, we have to update the
-			timestep too, so, we'll just take the blank only for the
-			first path and won't consider the token probs,
-			and for the second path, we'll consider the token probs
-			as well as the blank probs.
+			timestep too, so, we won't consider the token and blank
+			probs for the first path, so the child nodes won't have
+			a mess in the timestep order, and for the second path,
+			we'll consider both probs (if provided) as well as the
+			blank probs.
 	*/
-	this->_update_required = true;
-	writer.emplace_back(this);
+	if (!this->_is_at_writer) {
+		writer.emplace_back(this);
+		this->_is_at_writer = true;
+	}
 
 	if (prob > this->max_prob) {
 		this->_confident_prob += prob;
@@ -238,8 +241,10 @@ template <typename T>
 void
 zctc::Node<T>::acc_tk_and_parent_prob(T prob, std::vector<zctc::Node<T>*>& writer) noexcept
 {
-	this->_update_required = true;
-	writer.emplace_back(this);
+	if (!this->_is_at_writer) {
+		writer.emplace_back(this);
+		this->_is_at_writer = true;
+	}
 	/*
 	NOTE: Please look at `acc_prob` functions comment to understand how we are handling
 		  duplicate but more confident token.
@@ -319,6 +324,8 @@ zctc::Node<T>::acc_repeat_token_prob(int ts, T prob, std::vector<zctc::Node<T>*>
 
 		this->childs.emplace_back(child);
 		writer.emplace_back(child);
+		child->_is_at_writer = true;
+
 		return child;
 	}
 
@@ -362,6 +369,8 @@ zctc::Node<T>::extend_path(int id, int ts, T prob, const std::string token, std:
 
 	this->childs.emplace_back(child);
 	writer.emplace_back(child);
+	child->_is_at_writer = true;
+
 	return child;
 }
 
