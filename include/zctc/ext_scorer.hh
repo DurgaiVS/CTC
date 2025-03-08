@@ -12,18 +12,20 @@ class ExternalScorer {
 public:
 	const char tok_sep;
 	const int apostrophe_id;
-	const float alpha, penalty;
+	const float alpha, beta, lex_penalty;
 	lm::base::Model* lm;
 	fst::StdVectorFst* lexicon;
 
 	/*
 	NOTE: The `alpha` passed here should be in log(base 10) scale.
 	*/
-	ExternalScorer(char tok_sep, int apostrophe_id, float alpha, float penalty, char* lm_path, char* lexicon_path)
+	ExternalScorer(char tok_sep, int apostrophe_id, float alpha, float beta, float lex_penalty, char* lm_path,
+				   char* lexicon_path)
 		: tok_sep(tok_sep)
 		, apostrophe_id(apostrophe_id)
 		, alpha(alpha)
-		, penalty(penalty)
+		, beta(beta)
+		, lex_penalty(lex_penalty)
 		, lm(nullptr)
 		, lexicon(nullptr)
 	{
@@ -97,13 +99,14 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* node, fst::SortedMatcher<fs
 									  fst::StdVectorFst* hotwords_fst,
 									  fst::SortedMatcher<fst::StdVectorFst>* hotwords_matcher) const
 {
+	T lm_prob = zctc::ZERO, hw_score = zctc::ZERO, lex_score = zctc::ZERO;
 
 	if (this->lm) {
 
 		lm::WordIndex word_id = this->lm->BaseVocabulary().Index(node->token);
 
 		if (word_id == this->lm->BaseVocabulary().NotFound()) {
-			node->lm_prob = -1000; // OOV char
+			lm_prob = -1000; // OOV char
 		} else {
 			/*
 			NOTE: Since KenLM returns the log probability with base 10,
@@ -111,8 +114,8 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* node, fst::SortedMatcher<fs
 
 				logb(x) = loga(x) / loga(b)
 			*/
-			node->lm_prob
-				= this->alpha * (this->lm->BaseScore(&(node->parent->lm_state), word_id, &(node->lm_state)) / zctc::LOG_A_OF_B);
+			lm_prob = this->alpha
+					  * (this->lm->BaseScore(&(node->parent->lm_state), word_id, &(node->lm_state)) / zctc::LOG_A_OF_B);
 		}
 	}
 
@@ -123,6 +126,7 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* node, fst::SortedMatcher<fs
 		if (!(node->parent->is_lex_path || node->is_start_of_word)) {
 
 			node->is_lex_path = false;
+			lex_score = this->lex_penalty;
 
 		} else {
 
@@ -135,6 +139,7 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* node, fst::SortedMatcher<fs
 				node->is_lex_path = true;
 			} else {
 				node->is_lex_path = false;
+				lex_score = this->lex_penalty;
 			}
 		}
 	}
@@ -146,11 +151,17 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* node, fst::SortedMatcher<fs
 
 		if (hotwords_matcher->Find(node->id)) {
 			const fst::StdArc& arc = hotwords_matcher->Value();
-			node->hotword_length = arc.olabel;
-			node->hotword_weight = arc.weight.Value();
+			/*
+			NOTE: Here,
+				arc.olabel is the token length so far in the hotword,
+				arc.weight.Value() is the weight for each hotword token.
+			*/
+			hw_score = arc.olabel * arc.weight.Value();
 			node->is_hotpath = true;
 		}
 	}
+
+	node->ext_score = lm_prob + lex_score + hw_score + (this->beta * node->seq_length);
 }
 
 #endif // _ZCTC_EXT_SCORER_H

@@ -20,28 +20,26 @@ public:
 	static bool descending_compare(zctc::Node<T>* x, zctc::Node<T>* y);
 
 	const int thread_count, blank_id, cutoff_top_n, vocab_size;
-	const float beta, nucleus_prob_per_timestep, penalty, min_tok_prob, max_beam_score_deviation;
+	const float nucleus_prob_per_timestep, lex_penalty, min_tok_prob, max_beam_score_deviation;
 	const std::size_t beam_width;
 	const std::vector<std::string> vocab;
 	const ExternalScorer ext_scorer;
 
 	Decoder(int thread_count, int blank_id, int cutoff_top_n, int apostrophe_id, float nucleus_prob_per_timestep,
-			float alpha, float beta, std::size_t beam_width, float penalty, float min_tok_prob,
+			float alpha, float beta, std::size_t beam_width, float lex_penalty, float min_tok_prob,
 			float max_beam_score_deviation, char tok_sep, std::vector<std::string> vocab, char* lm_path,
 			char* lexicon_path)
 		: thread_count(thread_count)
 		, blank_id(blank_id)
 		, cutoff_top_n(cutoff_top_n)
 		, vocab_size(vocab.size())
-		, beta(beta)
 		, nucleus_prob_per_timestep(nucleus_prob_per_timestep)
-		, penalty(penalty)
+		, lex_penalty(lex_penalty)
 		, min_tok_prob(std::exp(min_tok_prob))
 		, max_beam_score_deviation(max_beam_score_deviation)
 		, beam_width(beam_width)
 		, vocab(vocab)
-		// NOTE: KenLM uses log base 10
-		, ext_scorer(tok_sep, apostrophe_id, alpha, penalty, lm_path, lexicon_path)
+		, ext_scorer(tok_sep, apostrophe_id, alpha, beta, lex_penalty, lm_path, lexicon_path)
 	{
 	}
 
@@ -128,10 +126,10 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 				// Just update the blank probs and continue
 				// in case of blank.
 				for (zctc::Node<T>* r_node : reader) {
-					r_node->_b_prob += prob;
-					if (!r_node->_is_at_writer) {
+					r_node->b_prob += prob;
+					if (!r_node->is_at_writer) {
 						writer.emplace_back(r_node);
-						r_node->_is_at_writer = true;
+						r_node->is_at_writer = true;
 					}
 				}
 
@@ -164,14 +162,14 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 		for (zctc::Node<T>* w_node : writer) {
 			/*
 			update total score for the node,
-			considering probs, LM probs, OOV penalty
+			considering probs, LM probs, OOV lex_penalty
 			recently updated token and blank probs
 			*/
 			pos_val++;
 
-			beam_score = w_node->update_score(decoder->penalty, timestep, decoder->beta, more_confident_repeats);
+			beam_score = w_node->update_score(timestep, more_confident_repeats);
 
-			if (w_node->_confident_prob != zctc::ZERO) {
+			if (w_node->more_confident_prob != zctc::ZERO) {
 				writer_remove_ids.emplace_back(pos_val);
 				continue;
 			}

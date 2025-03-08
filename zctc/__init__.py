@@ -3,7 +3,6 @@ __all__ = ["CTCDecoder", "ZFST"]
 from typing import Optional, Tuple, Union
 
 import torch
-
 from _zctc import _ZFST, _Decoder
 
 
@@ -26,7 +25,7 @@ class CTCDecoder(_Decoder):
         beta: float,
         beam_width: int,
         vocab: list[str],
-        unk_score: float = -5.0,
+        unk_lexicon_penalty: float = -5.0,
         min_tok_prob: float = -5.0,
         max_beam_deviation: float = -10.0,
         tok_sep: str = "#",
@@ -45,7 +44,7 @@ class CTCDecoder(_Decoder):
             alpha,
             beta,
             beam_width,
-            unk_score,
+            unk_lexicon_penalty,
             min_tok_prob,
             max_beam_deviation,
             tok_sep,
@@ -72,7 +71,10 @@ class CTCDecoder(_Decoder):
 #sort in ascending based on token length...
 
         sorted_indices = (
-            torch.argsort(logits, dim=2, descending=True).detach().to("cpu", torch.int32).numpy()
+            torch.argsort(logits, dim=2, descending=True)
+            .detach()
+            .to("cpu", torch.int32)
+            .numpy()
         )
         labels = torch.zeros((batch_size, self.beam_width, seq_len), dtype=torch.int32)
         timesteps = torch.zeros(
