@@ -165,10 +165,12 @@ zctc::Node<T>::update_score(int curr_ts, std::vector<zctc::Node<T>*>& more_confi
 		`*_prob` will be in linear scale,
 		`*_score, ` will be in log scale,
 	*/
-	this->intrm_score += std::log(this->tk_prob + this->b_prob);
 	if (this->squash_score != zctc::ZERO) {
-		this->intrm_score = std::log(std::exp(this->intrm_score) + std::exp(this->squash_score - this->p_score));
+		this->intrm_score = this->intrm_score
+							+ std::log(this->tk_prob + this->b_prob + std::exp(this->squash_score - this->intrm_score));
 		this->squash_score = zctc::ZERO;
+	} else {
+		this->intrm_score += std::log(this->tk_prob + this->b_prob);
 	}
 
 	this->score = this->p_score + this->intrm_score;
