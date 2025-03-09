@@ -18,7 +18,7 @@ class Node {
 public:
 	bool is_lex_path, is_start_of_word, is_hotpath, is_at_writer;
 	int ts, b_ts, tk_ts, seq_length;
-	T tk_prob, b_prob, squash_prob, more_confident_prob, prev_b_prob;
+	T tk_prob, b_prob, squash_score, more_confident_prob, prev_b_prob;
 	T max_prob, _max_prob, p_score, intrm_score, score, h_score, ext_score;
 	const int id;
 	const std::string token;
@@ -37,7 +37,7 @@ public:
 		, tk_ts(ts)
 		, tk_prob(prob)
 		, b_prob(zctc::ZERO)
-		, squash_prob(zctc::ZERO)
+		, squash_score(zctc::ZERO)
 		, more_confident_prob(zctc::ZERO)
 		, prev_b_prob(zctc::ZERO)
 		, max_prob(prob)
@@ -72,7 +72,7 @@ public:
 		, seq_length(other.seq_length)
 		, tk_prob(other.tk_prob)
 		, b_prob(other.b_prob)
-		, squash_prob(other.squash_prob)
+		, squash_score(other.squash_score)
 		, more_confident_prob(other.more_confident_prob)
 		, prev_b_prob(other.prev_b_prob)
 		, max_prob(other.max_prob)
@@ -138,7 +138,7 @@ zctc::Node<T>::update_score(int curr_ts, std::vector<zctc::Node<T>*>& more_confi
 		node->more_confident_prob = zctc::ZERO;
 
 		this->_max_prob = this->max_prob;
-		this->squash_prob = zctc::ZERO;
+		this->squash_score = zctc::ZERO;
 		this->is_at_writer = false;
 
 		return node->update_score(curr_ts, more_confident_repeats);
@@ -166,9 +166,9 @@ zctc::Node<T>::update_score(int curr_ts, std::vector<zctc::Node<T>*>& more_confi
 		`*_score, ` will be in log scale,
 	*/
 	this->intrm_score += std::log(this->tk_prob + this->b_prob);
-	if (this->squash_prob != zctc::ZERO) {
-		this->intrm_score = std::log(std::exp(this->intrm_score) + this->squash_prob);
-		this->squash_prob = zctc::ZERO;
+	if (this->squash_score != zctc::ZERO) {
+		this->intrm_score = std::log(std::exp(this->intrm_score) + std::exp(this->squash_score - this->p_score));
+		this->squash_score = zctc::ZERO;
 	}
 
 	this->score = this->p_score + this->intrm_score;
@@ -262,7 +262,7 @@ zctc::Node<T>::acc_tk_and_parent_prob(T prob, std::vector<zctc::Node<T>*>& write
 		  in the `update_score` function.
 	*/
 	T diff_prob = this->parent->score - this->p_score;
-	this->squash_prob += std::exp(diff_prob + std::log(prob));
+	this->squash_score = diff_prob + std::log(prob);
 }
 
 template <typename T>
