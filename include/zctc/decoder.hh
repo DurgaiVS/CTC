@@ -53,22 +53,26 @@ public:
 
 template <typename T>
 inline void
+move_clones_to_start(std::vector<zctc::Node<T>*>& source)
+{
+	for (int from_pos = 0, to_pos = 0; from_pos < source.size(); from_pos++) {
+		if (!source[from_pos]->is_clone)
+			continue;
+
+		std::iter_swap(source.begin() + from_pos, source.begin() + to_pos);
+		to_pos++;
+	}
+}
+
+template <typename T>
+inline void
 remove_from_source(std::vector<zctc::Node<T>*>& source, std::vector<int>& remove_ids)
 {
-	zctc::Node<T>** src_end = source.data() + (source.size() - 1);
-	zctc::Node<T>** src_begin = source.data();
-	zctc::Node<T>** intrm_val;
-	zctc::Node<T>* dummy;
-	int* rm_id = remove_ids.data() + (remove_ids.size() - 1);
+	int to_pos = source.size() - 1;
 
-	for (int id = 0; id < remove_ids.size(); id++) {
-		dummy = *src_end;
-		intrm_val = src_begin + (*rm_id);
-		*src_end = *intrm_val;
-		*intrm_val = dummy;
-
-		rm_id--;
-		src_end--;
+	for (auto id = remove_ids.rbegin(); id != remove_ids.rend(); id++) {
+		std::iter_swap(source.begin() + *id, source.begin() + to_pos);
+		to_pos--;
 	}
 
 	source.erase(source.end() - remove_ids.size(), source.end());
@@ -139,7 +143,7 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 			for (zctc::Node<T>* r_node : reader) {
 				// Check if the index is repeat or not and
 				// update the node accordingly
-				child = r_node->extend_path(index, timestep, prob, decoder->vocab[index], writer);
+				child = r_node->extend_path(index, timestep, prob, decoder->vocab[index], writer, reader);
 
 				/*
 				`nullptr` means the path extension was not done,
@@ -200,8 +204,10 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 		more_confident_repeats.clear();
 
 		reader.clear();
-		if (writer.size() <= decoder->beam_width)
+		if (writer.size() <= decoder->beam_width) {
+			move_clones_to_start(writer);
 			continue;
+		}
 
 		pos_val = 0;
 		beam_score = max_beam_score + decoder->max_beam_score_deviation;
@@ -213,12 +219,15 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 		}
 		remove_from_source(writer, writer_remove_ids);
 
-		if (writer.size() <= decoder->beam_width)
+		if (writer.size() <= decoder->beam_width) {
+			move_clones_to_start(writer);
 			continue;
+		}
 
 		std::nth_element(writer.begin(), writer.begin() + decoder->beam_width, writer.end(),
 						 Decoder::descending_compare<T>);
 		writer.erase(writer.begin() + decoder->beam_width, writer.end());
+		move_clones_to_start(writer);
 	}
 
 	std::vector<zctc::Node<T>*>& reader = ((seq_len % 2) == 0 ? prefixes0 : prefixes1);
