@@ -17,15 +17,15 @@ namespace zctc {
 template <typename T>
 class Node {
 public:
-	const bool is_clone;
+	const bool is_clone, only_prev_blank;
 	const int id;
 	const std::string token;
 
 	bool is_lex_path, is_start_of_word, is_hotpath, is_at_writer, is_deprecated;
 	int ts, b_ts, tk_ts, seq_length;
 	T tk_prob, b_prob, squash_score, more_confident_prob, prev_b_prob;
-	T max_prob, _max_prob, p_score, intrm_score, score, h_score, ext_score;
-	T aft_intrm_score;
+	T max_prob, _max_prob, p_score, _p_score, score, h_score, ext_score;
+	T intrm_score, aft_intrm_score;
 
 	Node<T>* parent;
 	lm::ngram::State lm_state;
@@ -33,8 +33,9 @@ public:
 	std::vector<Node<T>*> childs;
 	std::vector<Node<T>*>& alt_childs;
 
-	Node(int id, int ts, T prob, const std::string token, Node<T>* parent, bool ignore_aft_intrm = false)
+	Node(int id, int ts, T prob, const std::string token, Node<T>* parent, bool only_prev_blank = false)
 		: is_clone(false)
+		, only_prev_blank(only_prev_blank)
 		, id(id)
 		, token(token)
 		, is_lex_path(true)
@@ -53,10 +54,11 @@ public:
 		, max_prob(prob)
 		, _max_prob(prob)
 		, p_score(zctc::ZERO)
-		, intrm_score(zctc::ZERO)
+		, _p_score(zctc::ZERO)
 		, score(zctc::ZERO)
 		, h_score(zctc::ZERO)
 		, ext_score(zctc::ZERO)
+		, intrm_score(zctc::ZERO)
 		, aft_intrm_score(zctc::ZERO)
 		, parent(parent)
 		, alt_childs(this->childs)
@@ -67,16 +69,19 @@ public:
 		}
 
 		this->seq_length = parent->seq_length + 1;
-		if (!ignore_aft_intrm) {
+		if (!only_prev_blank) {
 			this->p_score = parent->score;
+			this->_p_score = parent->score;
 			return;
 		}
-		this->p_score = parent->p_score + parent->intrm_score + std::log(parent->prev_b_prob);
+		this->p_score = parent->_p_score + parent->intrm_score + std::log(parent->prev_b_prob);
+		this->_p_score = this->p_score;
 	}
 
 	// Clone Constructor
 	Node(int ts, T prob, Node<T>* parent, Node<T>* ref)
 		: is_clone(true)
+		, only_prev_blank(ref->only_prev_blank)
 		, id(ref->id)
 		, token(ref->token)
 		, is_lex_path(ref->is_lex_path)
@@ -96,10 +101,11 @@ public:
 		, max_prob(ref->max_prob)
 		, _max_prob(ref->_max_prob)
 		, p_score(ref->p_score)
-		, intrm_score(ref->intrm_score)
+		, _p_score(ref->_p_score)
 		, score(ref->score)
 		, h_score(ref->h_score)
 		, ext_score(ref->ext_score)
+		, intrm_score(ref->intrm_score)
 		, aft_intrm_score(ref->aft_intrm_score)
 		, parent(parent)
 		, alt_childs(ref->childs)
@@ -110,6 +116,7 @@ public:
 	// Copy Constructor
 	Node(Node& other)
 		: is_clone(true)
+		, only_prev_blank(other.only_prev_blank)
 		, id(other.id)
 		, token(other.token)
 		, is_lex_path(other.is_lex_path)
@@ -129,10 +136,11 @@ public:
 		, max_prob(other.max_prob)
 		, _max_prob(other._max_prob)
 		, p_score(other.p_score)
-		, intrm_score(other.intrm_score)
+		, _p_score(other._p_score)
 		, score(other.score)
 		, h_score(other.h_score)
 		, ext_score(other.ext_score)
+		, intrm_score(other.intrm_score)
 		, aft_intrm_score(other.aft_intrm_score)
 		, parent(other.parent)
 		, lm_state(other.lm_state) // TODO: Verify if the copy constructor is clean.
@@ -232,7 +240,7 @@ zctc::Node<T>::update_score(int curr_ts, std::vector<zctc::Node<T>*>& more_confi
 		this->aft_intrm_score = std::log(this->tk_prob + this->b_prob);
 	}
 
-	this->score = this->p_score + this->intrm_score + this->aft_intrm_score;
+	this->score = this->_p_score + this->intrm_score + this->aft_intrm_score;
 	this->h_score = this->score + this->ext_score;
 
 	if (this->tk_prob != zctc::ZERO) {
@@ -303,7 +311,7 @@ zctc::Node<T>::acc_tk_and_parent_prob(T prob, std::vector<zctc::Node<T>*>& write
 		  duplicate but more confident token.
 	*/
 
-	if (this->parent->score == this->p_score) {
+	if ((this->parent->score == this->p_score) || this->only_prev_blank) {
 		if (prob > this->max_prob) {
 			this->more_confident_prob += prob;
 			this->_max_prob = prob;
@@ -323,7 +331,8 @@ zctc::Node<T>::acc_tk_and_parent_prob(T prob, std::vector<zctc::Node<T>*>& write
 		  in the `update_score` function.
 	*/
 	assert(this->squash_score == zctc::ZERO);
-	T diff_prob = this->parent->score - this->p_score;
+	T diff_prob = this->parent->score - this->_p_score;
+	this->p_score = this->parent->score;
 	this->squash_score = diff_prob + std::log(prob);
 }
 
@@ -431,21 +440,29 @@ zctc::Node<T>::extend_path(int id, int ts, T prob, const std::string token, std:
 				// Delete this r_node ref from the alt_childs list.
 				child = r_node;
 				child->parent = this;
+				if (!child->is_at_writer) {
+					writer.emplace_back(child);
+					child->is_at_writer = true;
+				}
 
 				std::iter_swap(std::find(this->alt_childs.begin(), this->alt_childs.end(), r_node),
 							   this->alt_childs.end() - 1);
 				this->alt_childs.erase(this->alt_childs.end() - 1);
 			} else {
 				child = new zctc::Node<T>(ts, prob, this, r_node);
+				std::replace(reader.begin(), reader.end(), r_node, child);
 				if (r_node->is_at_writer) {
 					std::replace(writer.begin(), writer.end(), r_node, child);
+				} else {
+					writer.emplace_back(child);
+					child->is_at_writer = true;
 				}
-				std::replace(reader.begin(), reader.end(), r_node, child);
 			}
 
 			child->acc_tk_and_parent_prob(prob, writer);
 			if (child->ts <= this->ts) {
 				child->ts = ts;
+				child->tk_ts = ts;
 				child->max_prob = prob;
 				child->_max_prob = prob;
 			}
