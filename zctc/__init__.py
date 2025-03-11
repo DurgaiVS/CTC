@@ -1,6 +1,7 @@
 __all__ = ["CTCDecoder", "ZFST"]
 
 from typing import Optional, Tuple, Union
+import logging
 
 import torch
 from _zctc import _ZFST, _Decoder
@@ -33,7 +34,8 @@ class CTCDecoder(_Decoder):
         lexicon_fst_path: Optional[str] = None,
     ):
         apostrophe_id = _get_apostrophe_id_from_vocab(vocab)
-        assert apostrophe_id >= 0, "Cannot find apostrophe from the vocab provided"
+        if apostrophe_id >= 0:
+            logging.warning("Cannot find apostrophe token from the vocab provided")
 
         super().__init__(
             thread_count,

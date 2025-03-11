@@ -331,7 +331,7 @@ zctc::Node<T>::acc_tk_and_parent_prob(T prob, std::vector<zctc::Node<T>*>& write
 		  in the `update_score` function.
 	*/
 	assert(this->squash_score == zctc::ZERO);
-	T diff_prob = this->parent->score - this->_p_score;
+	T diff_prob = this->parent->score - this->p_score;
 	this->p_score = this->parent->score;
 	this->squash_score = diff_prob + std::log(prob);
 }
@@ -378,7 +378,7 @@ zctc::Node<T>::acc_repeat_token_prob(int ts, T prob, std::vector<zctc::Node<T>*>
 			if ((r_node->id != id) || r_node->is_deprecated)
 				continue;
 
-			r_node->acc_prob(prob, writer);
+			r_node->acc_tk_and_parent_prob(prob, writer);
 			return nullptr;
 		}
 
