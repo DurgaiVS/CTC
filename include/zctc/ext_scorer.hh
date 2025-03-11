@@ -99,7 +99,7 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* node, fst::SortedMatcher<fs
 									  fst::StdVectorFst* hotwords_fst,
 									  fst::SortedMatcher<fst::StdVectorFst>* hotwords_matcher) const
 {
-	T lm_prob = zctc::ZERO, hw_score = zctc::ZERO, lex_score = zctc::ZERO;
+	T lm_prob = 0.0, hw_score = 0.0, lex_score = 0.0;
 
 	if (this->lm) {
 

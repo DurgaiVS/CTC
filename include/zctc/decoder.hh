@@ -92,7 +92,7 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 	zctc::Node<T>* child;
 	std::vector<int> writer_remove_ids;
 	std::vector<zctc::Node<T>*> prefixes0, prefixes1, more_confident_repeats;
-	zctc::Node<T> root(zctc::ROOT_ID, -1, static_cast<T>(zctc::ZERO), "<s>", nullptr);
+	zctc::Node<T> root(zctc::ROOT_ID, -1, 0.0, "<s>", nullptr);
 	fst::SortedMatcher<fst::StdVectorFst> lexicon_matcher(decoder->ext_scorer.lexicon, fst::MATCH_INPUT);
 	fst::SortedMatcher<fst::StdVectorFst> hotwords_matcher(hotwords_fst, fst::MATCH_INPUT);
 
@@ -173,7 +173,7 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 
 			beam_score = w_node->update_score(timestep, more_confident_repeats);
 
-			if (w_node->more_confident_prob != zctc::ZERO) {
+			if (w_node->is_deprecated) {
 				writer_remove_ids.emplace_back(pos_val);
 				continue;
 			}
@@ -227,6 +227,7 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 		std::nth_element(writer.begin(), writer.begin() + decoder->beam_width, writer.end(),
 						 Decoder::descending_compare<T>);
 		writer.erase(writer.begin() + decoder->beam_width, writer.end());
+		std::sort(writer.begin(), writer.end(), Decoder::descending_compare<T>);
 		move_clones_to_start(writer);
 	}
 
