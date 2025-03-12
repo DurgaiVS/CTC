@@ -227,7 +227,6 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 		std::nth_element(writer.begin(), writer.begin() + decoder->beam_width, writer.end(),
 						 Decoder::descending_compare<T>);
 		writer.erase(writer.begin() + decoder->beam_width, writer.end());
-		std::sort(writer.begin(), writer.end(), Decoder::descending_compare<T>);
 		move_clones_to_start(writer);
 	}
 
