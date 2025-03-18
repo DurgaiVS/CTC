@@ -2,7 +2,6 @@
 #include <iostream>
 #include <numeric>
 
-#include "./defaults.hh"
 #include "zctc/decoder.hh"
 
 int
@@ -33,8 +32,8 @@ debug_decoder()
 	char tok_sep = '#';
 	int iter_count, blank_id, seq_len = 1000, thread_count = 1, cutoff_top_n = 40;
 	float nucleus_prob_per_timestep = 1.0, penalty = -5.0, alpha = 0.017, beta = 0;
-	float min_tok_prob = -5.0, max_beam_deviation = -10.0;
-	std::size_t beam_width = 250;
+	float min_tok_prob = -10.0, max_beam_deviation = -20.0;
+	std::size_t beam_width = 25;
 	std::string lm_path, lexicon_path, vocab_path;
 	std::vector<std::string> vocab;
 
@@ -96,62 +95,6 @@ debug_decoder()
 }
 
 int
-debug_decoder_with_constants()
-{
-
-	char tok_sep = '#';
-	int blank_id = 0, thread_count = 1, cutoff_top_n = 40;
-	float nucleus_prob_per_timestep = 1.0, penalty = -5.0, alpha = 0.17, beta = 0;
-	float min_tok_prob = -5.0, max_beam_deviation = -10.0;
-
-	std::size_t beam_width = 281;
-	std::string vocab_path;
-	std::vector<std::string> vocab;
-
-	std::cout << "Enter vocab path: ";
-	std::cin >> vocab_path;
-	std::cout << "Enter blank id: ";
-	std::cin >> blank_id;
-
-	int apostrophe_id = load_vocab(vocab, vocab_path.c_str());
-
-	zctc::Decoder decoder(thread_count, blank_id, cutoff_top_n, apostrophe_id, nucleus_prob_per_timestep, alpha, beta,
-						  beam_width, penalty, min_tok_prob, max_beam_deviation, tok_sep, vocab, nullptr, nullptr);
-
-	std::vector<float>& logits = defaults::logits;
-	std::vector<int> sorted_indices(decoder.vocab_size * defaults::seq_len);
-	std::vector<int> labels(decoder.beam_width * defaults::seq_len, 0);
-	std::vector<int> timesteps(decoder.beam_width * defaults::seq_len, 0);
-	std::vector<int> seq_pos(decoder.beam_width, 0);
-
-	// To get the sorted indices for the logits, timesteps wise
-	for (int i = 0, temp = 0; i < defaults::seq_len; i++) {
-		temp = i * decoder.vocab_size;
-		std::iota(sorted_indices.begin() + temp, sorted_indices.begin() + (temp + decoder.vocab_size), 0);
-		std::stable_sort(sorted_indices.begin() + temp, sorted_indices.begin() + (temp + decoder.vocab_size),
-						 [&logits, &temp](int a, int b) { return logits[temp + a] > logits[temp + b]; });
-	}
-
-	for (int i = 0, j = 0; i < defaults::seq_len; i++) {
-		j = i * decoder.vocab_size;
-		if (sorted_indices[j] == 0)
-			continue;
-		std::cout << i << " : " << sorted_indices[j] << ", " << sorted_indices[j + 1] << ", " << sorted_indices[j + 2]
-				  << std::endl;
-	}
-
-	zctc::decode<float>(&decoder, logits.data(), sorted_indices.data(), labels.data(), timesteps.data(),
-						defaults::seq_len, defaults::seq_len, seq_pos.data(), nullptr);
-
-	/*
-	NOTE: Only printing the first beam labels.
-	*/
-	for (int j = seq_pos[0]; j < defaults::seq_len; j++) {
-		std::cout << labels[j] << ":" << timesteps[j] << " ";
-	}
-}
-
-int
 debug_decoder_with_toy_exp()
 {
 
@@ -210,16 +153,14 @@ int
 main(int argc, char** argv)
 {
 	int choice;
-	std::cout << "Enter choice(0 for Decoder(with rand inputs), 1 for Decoder(with constant input), 2 for Decoder(with "
-				 "toy exp), 3 for FST: ";
+	std::cout << "Enter choice(0 for Decoder(with rand inputs), 1 for Decoder(with toy exp), 2 for FST: ";
 	std::cin >> choice;
+
 	if (choice == 0)
 		return debug_decoder();
 	else if (choice == 1)
-		return debug_decoder_with_constants();
-	else if (choice == 2)
 		return debug_decoder_with_toy_exp();
-	else if (choice == 3)
+	else if (choice == 2)
 		return debug_fst();
 	else {
 		std::cout << "Invalid choice. Exiting..." << std::endl;

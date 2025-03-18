@@ -29,6 +29,21 @@ PYBIND11_MODULE(_zctc, m)
 			 py::arg("batch_seq_pos"), py::arg("batch_size"), py::arg("max_seq_len"),
 			 py::arg("hotwords") = std::vector<std::vector<int>>(), py::arg("hotwords_weight") = std::vector<float>(),
 			 py::call_guard<py::gil_scoped_release>())
+
+#ifndef NDEBUG
+		// NOTE: This function is only for debugging purpose.
+		.def("serial_decode", &zctc::Decoder::serial_decode<float>, py::arg("batch_log_logits"),
+			 py::arg("batch_sorted_ids"), py::arg("batch_labels"), py::arg("batch_timesteps"), py::arg("batch_seq_len"),
+			 py::arg("batch_seq_pos"), py::arg("batch_size"), py::arg("max_seq_len"),
+			 py::arg("hotwords") = std::vector<std::vector<int>>(), py::arg("hotwords_weight") = std::vector<float>(),
+			 py::call_guard<py::gil_scoped_release>())
+		.def("serial_decode", &zctc::Decoder::serial_decode<double>, py::arg("batch_log_logits"),
+			 py::arg("batch_sorted_ids"), py::arg("batch_labels"), py::arg("batch_timesteps"), py::arg("batch_seq_len"),
+			 py::arg("batch_seq_pos"), py::arg("batch_size"), py::arg("max_seq_len"),
+			 py::arg("hotwords") = std::vector<std::vector<int>>(), py::arg("hotwords_weight") = std::vector<float>(),
+			 py::call_guard<py::gil_scoped_release>())
+#endif // NDEBUG
+
 		.def_readonly("blank_id", &zctc::Decoder::blank_id)
 		.def_readonly("beam_width", &zctc::Decoder::beam_width)
 		.def_readonly("cutoff_top_n", &zctc::Decoder::cutoff_top_n)

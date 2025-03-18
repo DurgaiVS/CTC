@@ -49,6 +49,16 @@ public:
 					  py::array_t<int>& batch_seq_len, py::array_t<int>& batch_seq_pos, const int batch_size,
 					  const int max_seq_len, std::vector<std::vector<int>>& hotwords,
 					  std::vector<float>& hotwords_weight) const;
+
+#ifndef NDEBUG
+	// NOTE: This function is only for debugging purpose.
+	template <typename T>
+	void serial_decode(py::array_t<T>& batch_log_logits, py::array_t<int>& batch_sorted_ids,
+					   py::array_t<int>& batch_labels, py::array_t<int>& batch_timesteps,
+					   py::array_t<int>& batch_seq_len, py::array_t<int>& batch_seq_pos, const int batch_size,
+					   const int max_seq_len, std::vector<std::vector<int>>& hotwords,
+					   std::vector<float>& hotwords_weight) const;
+#endif // NDEBUG
 };
 
 template <typename T>
@@ -84,8 +94,7 @@ int
 decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, const int seq_len, const int max_seq_len,
 	   int* seq_pos, fst::StdVectorFst* hotwords_fst)
 {
-
-	bool is_blank, full_beam;
+	bool is_blank;
 	int iter_val, pos_val;
 	T nucleus_max, nucleus_count, prob, max_beam_score, beam_score;
 	int *curr_id, *curr_l, *curr_t, *curr_p;
@@ -130,7 +139,7 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 				// Just update the blank probs and continue
 				// in case of blank.
 				for (zctc::Node<T>* r_node : reader) {
-					r_node->b_prob += prob;
+					r_node->b_prob = prob;
 					if (!r_node->is_at_writer) {
 						writer.emplace_back(r_node);
 						r_node->is_at_writer = true;
@@ -269,7 +278,8 @@ template <typename T>
 bool
 zctc::Decoder::descending_compare(zctc::Node<T>* x, zctc::Node<T>* y)
 {
-	return x->h_score > y->h_score;
+	return x->h_score != y->h_score ? x->h_score > y->h_score : x->seq_length < y->seq_length;
+	// NOTE: If probabilities are same, then we'll consider shorter sequences.
 }
 
 template <typename T>
@@ -322,5 +332,53 @@ zctc::Decoder::batch_decode(py::array_t<T>& batch_log_logits, py::array_t<int>& 
 		if (result.get() != 0)
 			throw std::runtime_error("Unexpected error occured during execution");
 }
+
+#ifndef NDEBUG
+// NOTE: This function is only for debugging purpose.
+
+template <typename T>
+void
+zctc::Decoder::serial_decode(py::array_t<T>& batch_log_logits, py::array_t<int>& batch_sorted_ids,
+							 py::array_t<int>& batch_labels, py::array_t<int>& batch_timesteps,
+							 py::array_t<int>& batch_seq_len, py::array_t<int>& batch_seq_pos, const int batch_size,
+							 const int max_seq_len, std::vector<std::vector<int>>& hotwords,
+							 std::vector<float>& hotwords_weight) const
+{
+	fst::StdVectorFst hotwords_fst;
+	if (!hotwords.empty()) {
+		populate_hotword_fst(&hotwords_fst, hotwords, hotwords_weight);
+	}
+
+	py::buffer_info logits_buf = batch_log_logits.request();
+	py::buffer_info ids_buf = batch_sorted_ids.request();
+	py::buffer_info labels_buf = batch_labels.request(true);
+	py::buffer_info timesteps_buf = batch_timesteps.request(true);
+	py::buffer_info seq_len_buf = batch_seq_len.request();
+	py::buffer_info seq_pos_buf = batch_seq_pos.request(true);
+
+	if (logits_buf.ndim != 3 || ids_buf.ndim != 3 || labels_buf.ndim != 3 || timesteps_buf.ndim != 3
+		|| seq_len_buf.ndim != 1 || seq_pos_buf.ndim != 2)
+		throw std::runtime_error("Logits must be three dimensional, like Batch x SeqLen x Vocab, "
+								 "and Sequence Length must be one dimensional, like Batch"
+								 "and Sequence Pos mus be two dimensional, like Batch x BeamWidth");
+
+	T* logits = static_cast<T*>(logits_buf.ptr);
+	int* ids = static_cast<int*>(ids_buf.ptr);
+	int* labels = static_cast<int*>(labels_buf.ptr);
+	int* timesteps = static_cast<int*>(timesteps_buf.ptr);
+	int* seq_len = static_cast<int*>(seq_len_buf.ptr);
+	int* seq_pos = static_cast<int*>(seq_pos_buf.ptr);
+
+	for (int i = 0, ip_pos = 0, op_pos = 0, s_p = 0; i < batch_size; i++) {
+		ip_pos = i * max_seq_len * this->vocab_size;
+		op_pos = i * this->beam_width * max_seq_len;
+		s_p = i * this->beam_width;
+
+		zctc::decode<T>(this, logits + ip_pos, ids + ip_pos, labels + op_pos, timesteps + op_pos, *(seq_len + i),
+						max_seq_len, seq_pos + s_p, (hotwords.empty() ? nullptr : &hotwords_fst));
+	}
+}
+
+#endif // NDEBUG
 
 #endif // _ZCTC_DECODER_H

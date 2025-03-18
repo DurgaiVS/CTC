@@ -16,6 +16,28 @@ def _get_apostrophe_id_from_vocab(vocab: list[str]) -> int:
 
 
 class CTCDecoder(_Decoder):
+    """
+    A fast and efficient CTC beam decoder with C++ backend.
+
+    Args:
+        thread_count: Number of threads to use for decoding.
+        blank_id: The blank token id.
+        cutoff_top_n: Number of candidate tokens to parse per timeframe (sorted descendingly).
+        cutoff_prob: Candidate tokens to consider whose cumulative probability threshold [0, 1]
+                     reaches this value (sorted descendingly).
+        alpha: Language model weight.
+        beta: Word insertion weight.
+        beam_width: Beam width to use for decoding.
+        vocab: Vocabulary of the model.
+        unk_lexicon_penalty: Penalty to apply for unknown tokens in the lexicon.
+        min_tok_prob: Minimum probability for a token to consider in a timeframe.
+        max_beam_deviation: Maximum beam deviation value from the top most beam.
+        tok_sep: Token separator used in vocabulary tokens.
+                 Eg: "#" in "##a" for BPE tokens.
+        lm_path: Path to KenLM build language model file (either `bin` or `arpa`).
+        lexicon_fst_path: Path to ZFST build lexicon file (either `fst` or `fst.opt`).
+    """
+
     def __init__(
         self,
         thread_count: int,
@@ -64,7 +86,91 @@ class CTCDecoder(_Decoder):
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Expecting the logits to be softmaxed and not in log scale.
+
+        Args:
+            logits: Input logits from model (batch_size, seq_len, vocab_size),
+                    can be of type `torch.float32` or `torch.float64`.
+            seq_lens: Length of each unpadded sequence in the batch.
+            hotwords: List of hotword tokens.
+            hotwords_weight: List of weights for each hotword token or a single weight
+                             for all hotword tokens.
+
+        Returns:
+            A tuple containing the following:
+                - labels: Decoded labels (batch_size, beam_width, seq_len).
+                - timesteps: Timesteps of the decoded labels (batch_size, beam_width, seq_len).
+                - seq_pos: Start index of both labels and timesteps (batch_size, beam_width).
         """
+        batch_size, seq_len, _ = logits.shape
+        if isinstance(hotwords_weight, float):
+            hotwords_weight = [hotwords_weight] * len(hotwords)
+
+#TODO : sort hotwords in descending based on weight, and for same weight
+#sort in ascending based on token length...
+
+        sorted_indices = (
+            torch.argsort(logits, dim=2, descending=True)
+            .detach()
+            .to("cpu", torch.int32)
+            .numpy()
+        )
+        labels = torch.empty((batch_size, self.beam_width, seq_len), dtype=torch.int32)
+        timesteps = torch.empty(
+            (batch_size, self.beam_width, seq_len), dtype=torch.int32
+        )
+        seq_pos = torch.empty((batch_size, self.beam_width), dtype=torch.int32)
+
+        self.batch_decode(
+            logits.detach().cpu().numpy(),
+            sorted_indices,
+            labels.numpy(),
+            timesteps.numpy(),
+            seq_lens.detach().to("cpu", torch.int32).numpy(),
+            seq_pos.numpy(),
+            batch_size,
+            seq_len,
+            hotwords,
+            hotwords_weight,
+        )
+
+        return labels, timesteps, seq_pos
+
+    def sequential_decode(
+        self,
+        logits: torch.Tensor,
+        seq_lens: torch.Tensor,
+        hotwords: list[list[int]] = [],
+        hotwords_weight: Union[float, list[float]] = [],
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Expecting the logits to be softmaxed and not in log scale.
+
+        NOTE: This method should only be used with the `DEBUG` mode
+            build of the `zctc`.
+
+        Args:
+            logits: Input logits from model (batch_size, seq_len, vocab_size),
+                    can be of type `torch.float32` or `torch.float64`.
+            seq_lens: Length of each unpadded sequence in the batch.
+            hotwords: List of hotword tokens.
+            hotwords_weight: List of weights for each hotword token or a single weight
+                             for all hotword tokens.
+
+        Returns:
+            A tuple containing the following:
+                - labels: Decoded labels (batch_size, beam_width, seq_len).
+                - timesteps: Timesteps of the decoded labels (batch_size, beam_width, seq_len).
+                - seq_pos: Start index of both labels and timesteps (batch_size, beam_width).
+
+        Raises:
+            AttributeError: If the method is called with the `RELEASE` mode
+                build of the `zctc`.
+        """
+        if not hasattr(self, "serial_decode"):
+            raise AttributeError(
+                "This method can only be used with the `DEBUG` mode build of the `zctc`."
+            )
+
         batch_size, seq_len, _ = logits.shape
         if isinstance(hotwords_weight, float):
             hotwords_weight = [hotwords_weight] * len(hotwords)
@@ -84,7 +190,7 @@ class CTCDecoder(_Decoder):
         )
         seq_pos = torch.zeros((batch_size, self.beam_width), dtype=torch.int32)
 
-        self.batch_decode(
+        self.serial_decode(
             logits.detach().cpu().numpy(),
             sorted_indices,
             labels.numpy(),
