@@ -61,6 +61,15 @@ public:
 #endif // NDEBUG
 };
 
+/**
+ * @brief Moves the clone nodes present in the source vector to the
+ * start of the vector. This is done to avoid the unnecessary
+ * expanding of the `source & deprecated` node.
+ *
+ * @param source The source vector from which the clone nodes are to be moved.
+ *
+ * @return void
+ */
 template <typename T>
 inline void
 move_clones_to_start(std::vector<zctc::Node<T>*>& source)
@@ -74,6 +83,17 @@ move_clones_to_start(std::vector<zctc::Node<T>*>& source)
 	}
 }
 
+/**
+ * @brief Removes the nodes from the source vector, based on the remove_ids
+ * vector. To efficiently remove the elements, we'll swap the elements to be
+ * removed to the end of the source vector and then erase the whole block
+ * of elements.
+ *
+ * @param source The source vector from which the elements are to be removed.
+ * @param remove_ids The vector containing the indices of the elements in the source vector to be removed.
+ *
+ * @return void
+ */
 template <typename T>
 inline void
 remove_from_source(std::vector<zctc::Node<T>*>& source, std::vector<int>& remove_ids)
@@ -89,6 +109,26 @@ remove_from_source(std::vector<zctc::Node<T>*>& source, std::vector<int>& remove
 	remove_ids.clear();
 }
 
+/**
+ * @brief Decodes the provided logits using CTC Beam Search algorithm,
+ * using the provided decoder configuration. The decoded labels, timesteps
+ * and sequence lengths are written to the provided array pointers.
+ *
+ * @param decoder The decoder configuration to be used for decoding.
+ * @param logits The logits array of shape Batch x SeqLen x Vocab, containing the softmaxed probabilities in linear
+ * scale.
+ * @param ids The sorted ids array of shape Batch x SeqLen x Vocab, containing the sorted indices of the logits at each
+ * timestep.
+ * @param label The labels array of shape Batch x BeamWidth x MaxSeqLen, to write the decoded labels.
+ * @param timestep The timesteps array of shape Batch x BeamWidth x MaxSeqLen, to write the decoded timesteps.
+ * @param seq_len The sequence length of the sample in the logits array excluding the padding.
+ * @param max_seq_len The maximum sequence length of the sample in the logits array including the padding.
+ * @param seq_pos The sequence position array of shape Batch x BeamWidth, to write the sequence starting position of the
+ * decoded labels.
+ * @param hotwords_fst The FST representing the hotwords, if any, to be used for decoding.
+ *
+ * @return int 0 on successful execution.
+ */
 template <typename T>
 int
 decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, const int seq_len, const int max_seq_len,
@@ -108,15 +148,19 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 	nucleus_max = static_cast<T>(decoder->nucleus_prob_per_timestep);
 	decoder->ext_scorer.initialise_start_states(&root, hotwords_fst);
 
-	// For performance reasons, we initialise and reserve memory
-	// for the prefixes
+	/*
+	NOTE: For performance reasons, we initialise and reserve memory
+		  for the prefixes
+	*/
 	prefixes0.reserve(3 * decoder->beam_width);
 	prefixes1.reserve(3 * decoder->beam_width);
 	prefixes0.emplace_back(&root);
 
 	for (int timestep = 0; timestep < seq_len; timestep++) {
-		// Swap the reader and writer vectors, as per the timestep,
-		// to avoid cleaning and copying the elements.
+		/*
+		Note: Swap the reader and writer vectors, as per the timestep,
+			  to avoid cleaning and copying the elements.
+		*/
 		std::vector<zctc::Node<T>*>& reader = ((timestep % 2) == 0 ? prefixes0 : prefixes1);
 		std::vector<zctc::Node<T>*>& writer = ((timestep % 2) == 0 ? prefixes1 : prefixes0);
 
@@ -133,11 +177,12 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 
 			is_blank = index == decoder->blank_id;
 			nucleus_count += prob;
-			// prob = std::log(prob);
 
 			if (is_blank) {
-				// Just update the blank probs and continue
-				// in case of blank.
+				/*
+				Note: Just update the blank probs of the node and
+					  continue in case if the current is blank token.
+				*/
 				for (zctc::Node<T>* r_node : reader) {
 					r_node->b_prob = prob;
 					if (!r_node->is_at_writer) {
@@ -150,19 +195,22 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 			}
 
 			for (zctc::Node<T>* r_node : reader) {
-				// Check if the index is repeat or not and
-				// update the node accordingly
 				child = r_node->extend_path(index, timestep, prob, decoder->vocab[index], writer, reader);
 
 				/*
-				`nullptr` means the path extension was not done,
-				(ie) no new node was created,
-				the probs were accumulated within the current node.
+				NOTE: `nullptr` means the path extension was not done,
+					  (ie) no new node was created, the probs were
+					  accumulated within the current node, or the node
+					  was cloned.
 				*/
 				if (child == nullptr)
 					continue;
 
-				// only newly created nodes are considered for external scoring.
+				/*
+				NOTE: Only newly extended nodes from the `r_node` are
+					  considered for external scoring. This is done once
+					  per new node creation.
+				*/
 				decoder->ext_scorer.run_ext_scoring(child, &lexicon_matcher, hotwords_fst, &hotwords_matcher);
 			}
 
@@ -174,9 +222,10 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 		max_beam_score = std::numeric_limits<T>::lowest();
 		for (zctc::Node<T>* w_node : writer) {
 			/*
-			update total score for the node,
-			considering probs, LM probs, OOV lex_penalty
-			recently updated token and blank probs
+			NOTE: Updating the `score` and `h_score` of the
+				  nodes, considering the AM probs, KenLM probs,
+				  lexicon penalty, hotword boosting values and
+				  beta word penalty.
 			*/
 			pos_val++;
 
@@ -274,14 +323,49 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 
 /* ---------------------------------------------------------------------------- */
 
+/**
+ * @brief Compares the two nodes based on the `h_score` and `seq_length`,
+ * 		  considering higher `h_score` and lower `seq_length` as the best.
+ *
+ * @tparam T The type of the node's probs.
+ * @param x The first node to be compared.
+ * @param y The second node to be compared.
+ *
+ * @return `true` If the first node is better than the second node.
+ * @return `false` If the second node is better than the first node.
+ */
 template <typename T>
 bool
 zctc::Decoder::descending_compare(zctc::Node<T>* x, zctc::Node<T>* y)
 {
-	return x->h_score != y->h_score ? x->h_score > y->h_score : x->seq_length < y->seq_length;
 	// NOTE: If probabilities are same, then we'll consider shorter sequences.
+	return x->h_score != y->h_score ? x->h_score > y->h_score : x->seq_length < y->seq_length;
 }
 
+/**
+ * @brief Concurrently decodes the provided batch of logits and its supporting
+ *  	  arrays using CTC Beam Search algorithm, using the provided decoder
+ * 		  configuration. The decoded labels, timesteps and sequence positions
+ * 		  are written to the provided array pointers.
+ *
+ * @tparam T The type of the logits array.
+ * @param batch_log_logits The batch of logits array of shape Batch x SeqLen x Vocab, containing the softmaxed
+ * probabilities in linear scale.
+ * @param batch_sorted_ids The batch of sorted ids array of shape Batch x SeqLen x Vocab, containing the sorted indices
+ * of the logits at each timestep.
+ * @param batch_labels The batch of labels array of shape Batch x BeamWidth x MaxSeqLen, to write the decoded labels.
+ * @param batch_timesteps The batch of timesteps array of shape Batch x BeamWidth x MaxSeqLen, to write the decoded
+ * timesteps.
+ * @param batch_seq_len The batch of sequence length of the samples in the logits array excluding the padding.
+ * @param batch_seq_pos The batch of sequence position array of shape Batch x BeamWidth, to write the sequence starting
+ * position of the decoded labels.
+ * @param batch_size The number of samples in the batch.
+ * @param max_seq_len The maximum sequence length of the samples in the logits array including the padding.
+ * @param hotwords Vector of hotword tokens to consider for hotword boosting.
+ * @param hotwords_weight Vector of hotword weights to consider for hotword boosting.
+ *
+ * @return void
+ */
 template <typename T>
 void
 zctc::Decoder::batch_decode(py::array_t<T>& batch_log_logits, py::array_t<int>& batch_sorted_ids,
@@ -334,8 +418,34 @@ zctc::Decoder::batch_decode(py::array_t<T>& batch_log_logits, py::array_t<int>& 
 }
 
 #ifndef NDEBUG
-// NOTE: This function is only for debugging purpose.
 
+/**
+ * @brief Serially decodes the provided batch of logits and its supporting
+ *  	  arrays using CTC Beam Search algorithm, using the provided decoder
+ * 		  configuration. The decoded labels, timesteps and sequence positions
+ * 		  are written to the provided array pointers.
+ *
+ * @note This function is only for debugging purpose. It will not be inlcuded
+ * 		 in the release build.
+ *
+ * @tparam T The type of the logits array.
+ * @param batch_log_logits The batch of logits array of shape Batch x SeqLen x Vocab, containing the softmaxed
+ * probabilities in linear scale.
+ * @param batch_sorted_ids The batch of sorted ids array of shape Batch x SeqLen x Vocab, containing the sorted indices
+ * of the logits at each timestep.
+ * @param batch_labels The batch of labels array of shape Batch x BeamWidth x MaxSeqLen, to write the decoded labels.
+ * @param batch_timesteps The batch of timesteps array of shape Batch x BeamWidth x MaxSeqLen, to write the decoded
+ * timesteps.
+ * @param batch_seq_len The batch of sequence length of the samples in the logits array excluding the padding.
+ * @param batch_seq_pos The batch of sequence position array of shape Batch x BeamWidth, to write the sequence starting
+ * position of the decoded labels.
+ * @param batch_size The number of samples in the batch.
+ * @param max_seq_len The maximum sequence length of the samples in the logits array including the padding.
+ * @param hotwords Vector of hotword tokens to consider for hotword boosting.
+ * @param hotwords_weight Vector of hotword weights to consider for hotword boosting.
+ *
+ * @return void
+ */
 template <typename T>
 void
 zctc::Decoder::serial_decode(py::array_t<T>& batch_log_logits, py::array_t<int>& batch_sorted_ids,

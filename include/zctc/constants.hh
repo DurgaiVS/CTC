@@ -5,8 +5,8 @@
 
 namespace zctc {
 
-static int ROOT_ID = -1;
-static float LOG_A_OF_B = std::log10(std::exp(1.0f));
+static const int ROOT_ID = -1;
+static const float LOG_A_OF_B = std::log10(std::exp(1.0f));
 
 }
 

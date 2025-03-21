@@ -4,6 +4,14 @@
 
 #include "zctc/decoder.hh"
 
+/**
+ * @brief Loads the vocabulary from the provided path to the vocab vector and returns the index of the apostrophe.
+ *
+ * @param vocab The vector to store the vocab.
+ * @param vocab_path The path to the vocab file.
+ *
+ * @return The index of the apostrophe in the vocab.
+ */
 int
 load_vocab(std::vector<std::string>& vocab, const char* vocab_path)
 {
@@ -25,6 +33,11 @@ load_vocab(std::vector<std::string>& vocab, const char* vocab_path)
 	return apostrophe_id;
 }
 
+/**
+ * @brief Test the decoder with random logits.
+ *
+ * @return int 0 on successful execution
+ */
 int
 debug_decoder()
 {
@@ -94,6 +107,11 @@ debug_decoder()
 	return 0;
 }
 
+/**
+ * @brief A toy experiment to test the decoder.
+ *
+ * @return int 0 on successful execution
+ */
 int
 debug_decoder_with_toy_exp()
 {
@@ -133,6 +151,11 @@ debug_decoder_with_toy_exp()
 	}
 }
 
+/**
+ * @brief Test the FST with the provided vocab and lexicon file.
+ *
+ * @return int 0 on successful execution
+ */
 int
 debug_fst()
 {

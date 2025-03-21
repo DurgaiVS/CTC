@@ -212,5 +212,13 @@ class CTCDecoder(_Decoder):
 
 
 class ZFST(_ZFST):
+    """
+    Lexicon FST builder for CTC decoder.
+
+    Args:
+        vocab_path: Path to the vocabulary file.
+        fst_path: Path to the output FST file.
+    """
+
     def __init__(self, vocab_path: str, fst_path: Optional[str] = None):
         super().__init__(vocab_path, fst_path)
