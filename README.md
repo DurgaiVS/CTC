@@ -8,7 +8,7 @@
 - Seamless integration with Python via pybind
 - Easy to use API
 
-## Feaures yet to include
+## Features yet to include
 
 - Currently `softmax` inputs only are supported, have to provide support for `log_softmax` and `unnormalized` inputs too.
 - Currently this package only accepts BPE tokenized vocabulary, still have to add Character vocab and any other as per requirements.
@@ -34,4 +34,4 @@ Contributions are welcome! Please open an issue or submit a pull request on GitH
 
 ## Contact
 
-For any questions or inquiries, please contact [durgaivel0309@gmail.com].
+For any questions or inquiries, please contact [durgaivelselvan.mn@zohocorp.com].

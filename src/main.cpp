@@ -1,3 +1,4 @@
+#include <chrono>
 #include <ctime>
 #include <iostream>
 #include <numeric>
@@ -79,6 +80,7 @@ debug_decoder()
 	zctc::populate_hotword_fst(&hotwords_fst, hotwords, hotwords_weight);
 
 	// To generate random values for logits
+	std::chrono::milliseconds duration(0);
 	std::random_device rnd_device;
 	std::mt19937 mersenne_engine { rnd_device() };
 	std::uniform_real_distribution<float> dist { 0.0f, 0.05f };
@@ -86,6 +88,8 @@ debug_decoder()
 
 	for (int t = 0, temp = 0; t < iter_count; t++) {
 
+		std::cout << "\rIteration: " << t + 1 << " / " << iter_count << " [" << duration.count() << " ms / it]"
+				  << std::flush;
 		std::generate(logits.begin(), logits.end(), gen);
 
 		// To get the sorted indices for the logits, timesteps wise
@@ -96,8 +100,11 @@ debug_decoder()
 							 [&logits, &temp](int a, int b) { return logits[temp + a] > logits[temp + b]; });
 		}
 
+		auto start = std::chrono::high_resolution_clock::now();
 		zctc::decode<float>(&decoder, logits.data(), sorted_indices.data(), labels.data(), timesteps.data(), seq_len,
 							seq_len, seq_pos.data(), &hotwords_fst);
+		auto end = std::chrono::high_resolution_clock::now();
+		duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 
 		std::fill(labels.begin(), labels.end(), 0);
 		std::fill(timesteps.begin(), timesteps.end(), 0);

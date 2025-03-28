@@ -12,14 +12,14 @@ class ExternalScorer {
 public:
 	const char tok_sep;
 	const int apostrophe_id;
-	const float alpha, beta, lex_penalty;
+	const double alpha, beta, lex_penalty;
 	lm::base::Model* lm;
 	fst::StdVectorFst* lexicon;
 
 	/*
 	NOTE: The `alpha` passed here should be in log(base 10) scale.
 	*/
-	ExternalScorer(char tok_sep, int apostrophe_id, float alpha, float beta, float lex_penalty, char* lm_path,
+	ExternalScorer(char tok_sep, int apostrophe_id, double alpha, double beta, double lex_penalty, char* lm_path,
 				   char* lexicon_path)
 		: tok_sep(tok_sep)
 		, apostrophe_id(apostrophe_id)
@@ -207,7 +207,7 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* node, fst::SortedMatcher<fs
 		}
 	}
 
-	node->_ext_score += (this->beta * node->seq_length); // this->beta;
+	node->_ext_score += this->beta; // (this->beta * node->seq_length);
 }
 
 #endif // _ZCTC_EXT_SCORER_H

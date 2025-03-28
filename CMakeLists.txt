@@ -12,7 +12,7 @@ endif()
 set(KENLM_MAX_ORDER 4)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -pedantic -fPIC -DKENLM_MAX_ORDER=${KENLM_MAX_ORDER}")
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g -fsanitize=address,undefined -fsanitize-recover=all -fsanitize-address-use-after-scope -fno-omit-frame-pointer")
 
 find_package(Boost REQUIRED)
 find_library(PTHREAD NAMES pthread REQUIRED)
@@ -62,6 +62,7 @@ install(TARGETS _zctc LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
 set_target_properties(_zctc kenlm_filter kenlm_builder kenlm_util kenlm PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${LIBRARY_OUTPUT_DIRECTORY})
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+
     add_executable(zctc ${CMAKE_SOURCE_DIR}/src/main.cpp ${FST_SOURCES})
     target_link_libraries(zctc PUBLIC ${PYTHON_LIBRARIES} kenlm_filter kenlm_builder kenlm_util kenlm pthread dl util)
     if(TARGET z)
@@ -74,6 +75,9 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_link_libraries(zctc PUBLIC lzma)
     endif()
 
+    target_link_options(zctc PUBLIC -fsanitize=address,undefined -fsanitize=undefined)
+    target_link_options(_zctc PUBLIC -fsanitize=address,undefined -fsanitize=undefined)
     install(TARGETS zctc RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
     set_target_properties(zctc PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${LIBRARY_OUTPUT_DIRECTORY})
+
 endif()

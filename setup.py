@@ -78,8 +78,8 @@ setup(
     name="zctc",
     version="0.1",
     description="A fast and efficient CTC beam decoder with C++ backend.",
-    author="Durgai Vel Selvan",
-    author_email="durgaivel0309@gmail.com",
+    author="Durgai Vel Selvan M",
+    author_email="durgaivelselvan.mn@zohocorp.com",
     packages=find_packages(),
     ext_modules=[CMakeExtension("_zctc", Path(__file__).parent)],
     cmdclass={

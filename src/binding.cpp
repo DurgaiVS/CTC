@@ -3,7 +3,7 @@
 PYBIND11_MODULE(_zctc, m)
 {
 	py::class_<zctc::ExternalScorer>(m, "_ExternalScorer")
-		.def(py::init<char, int, float, float, float, char*, char*>(), py::arg("tok_sep"), py::arg("apostrophe_id"),
+		.def(py::init<char, int, double, double, double, char*, char*>(), py::arg("tok_sep"), py::arg("apostrophe_id"),
 			 py::arg("alpha"), py::arg("beta"), py::arg("lex_penalty"), py::arg("lm_path") = nullptr,
 			 py::arg("lexicon_path") = nullptr)
 		.def_readonly("tok_sep", &zctc::ExternalScorer::tok_sep)
@@ -13,7 +13,7 @@ PYBIND11_MODULE(_zctc, m)
 		.def_readonly("lex_penalty", &zctc::ExternalScorer::lex_penalty);
 
 	py::class_<zctc::Decoder>(m, "_Decoder")
-		.def(py::init<int, int, int, int, float, float, float, py::ssize_t, float, float, float, char,
+		.def(py::init<int, int, int, int, double, double, double, py::ssize_t, double, double, double, char,
 					  std::vector<std::string>, char*, char*>(),
 			 py::arg("thread_count"), py::arg("blank_id"), py::arg("cutoff_top_n"), py::arg("apostrophe_id"),
 			 py::arg("nucleus_prob_per_timestep"), py::arg("alpha"), py::arg("beta"), py::arg("beam_width"),

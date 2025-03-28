@@ -20,21 +20,20 @@ public:
 	static bool descending_compare(zctc::Node<T>* x, zctc::Node<T>* y);
 
 	const int thread_count, blank_id, cutoff_top_n, vocab_size;
-	const float nucleus_prob_per_timestep, lex_penalty, min_tok_prob, max_beam_score_deviation;
+	const double nucleus_prob_per_timestep, min_tok_prob, max_beam_score_deviation;
 	const std::size_t beam_width;
 	const std::vector<std::string> vocab;
 	const ExternalScorer ext_scorer;
 
-	Decoder(int thread_count, int blank_id, int cutoff_top_n, int apostrophe_id, float nucleus_prob_per_timestep,
-			float alpha, float beta, std::size_t beam_width, float lex_penalty, float min_tok_prob,
-			float max_beam_score_deviation, char tok_sep, std::vector<std::string> vocab, char* lm_path,
+	Decoder(int thread_count, int blank_id, int cutoff_top_n, int apostrophe_id, double nucleus_prob_per_timestep,
+			double alpha, double beta, std::size_t beam_width, double lex_penalty, double min_tok_prob,
+			double max_beam_score_deviation, char tok_sep, std::vector<std::string> vocab, char* lm_path,
 			char* lexicon_path)
 		: thread_count(thread_count)
 		, blank_id(blank_id)
 		, cutoff_top_n(cutoff_top_n)
 		, vocab_size(vocab.size())
 		, nucleus_prob_per_timestep(nucleus_prob_per_timestep)
-		, lex_penalty(lex_penalty)
 		, min_tok_prob(std::exp(min_tok_prob))
 		, max_beam_score_deviation(max_beam_score_deviation)
 		, beam_width(beam_width)
@@ -134,9 +133,9 @@ int
 decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, const int seq_len, const int max_seq_len,
 	   int* seq_pos, fst::StdVectorFst* hotwords_fst)
 {
-	bool is_blank;
+	bool is_blank, full_beam;
 	int iter_val, pos_val;
-	T nucleus_max, nucleus_count, prob, max_beam_score, beam_score;
+	T nucleus_max, nucleus_count, prob, b_prob, max_beam_score, min_beam_score, beam_score;
 	int *curr_id, *curr_l, *curr_t, *curr_p;
 	zctc::Node<T>* child;
 	std::vector<int> writer_remove_ids;
@@ -150,10 +149,12 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 
 	/*
 	NOTE: For performance reasons, we initialise and reserve memory
-		  for the prefixes
+		  for the prefixes. But due to some technical fault encountered,
+		  `cannot create std::vector larger than max_size()`,
+		  we're keeping the number as low as possible.
 	*/
-	prefixes0.reserve(3 * decoder->beam_width);
-	prefixes1.reserve(3 * decoder->beam_width);
+	prefixes0.reserve(2 * decoder->beam_width);
+	prefixes1.reserve(2 * decoder->beam_width);
 	prefixes0.emplace_back(&root);
 
 	for (int timestep = 0; timestep < seq_len; timestep++) {
@@ -167,6 +168,22 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 		nucleus_count = 0;
 		iter_val = timestep * decoder->vocab_size;
 		curr_id = ids + iter_val;
+		full_beam = reader.size() >= decoder->beam_width;
+
+		if (full_beam) {
+			/*
+			NOTE: Parlance style of pruning the node extensions
+				  based on their score.
+			*/
+			min_beam_score = std::numeric_limits<T>::max();
+			for (zctc::Node<T>* r_node : reader) {
+				if (r_node->h_score < min_beam_score)
+					min_beam_score = r_node->h_score;
+			}
+
+			b_prob = logits[iter_val + decoder->blank_id];
+			min_beam_score = min_beam_score + std::log(b_prob) - decoder->ext_scorer.beta;
+		}
 
 		for (int i = 0, index = 0; i < decoder->cutoff_top_n; i++, curr_id++) {
 			index = *curr_id;
@@ -195,6 +212,17 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 			}
 
 			for (zctc::Node<T>* r_node : reader) {
+				/*
+				NOTE: Parlance style will be just accumulating
+					  the token probs, but we've included the blank
+					  probs too, coz, there they'll be updating the
+					  score of the node immediately after node extension,
+					  but we update score only at the end of each timestep
+					  parsing.
+				*/
+				if (full_beam && ((r_node->h_score + std::log(prob + b_prob)) < min_beam_score))
+					break;
+
 				child = r_node->extend_path(index, timestep, prob, decoder->vocab[index], writer, reader);
 
 				/*
