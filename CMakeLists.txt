@@ -12,7 +12,7 @@ endif()
 set(KENLM_MAX_ORDER 4)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -pedantic -fPIC -DKENLM_MAX_ORDER=${KENLM_MAX_ORDER}")
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g -fsanitize=address,undefined -fsanitize-recover=all -fsanitize-address-use-after-scope -fno-omit-frame-pointer")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g")
 
 find_package(Boost REQUIRED)
 find_library(PTHREAD NAMES pthread REQUIRED)
@@ -39,15 +39,38 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/progschj/ThreadPool.git
     GIT_TAG 9a42ec13
 )
+FetchContent_Declare(
+    utf8_external
+    GIT_REPOSITORY https://github.com/nemtrif/utfcpp.git
+    GIT_TAG v4.0.6
+)
 
-FetchContent_MakeAvailable(pybind11 kenlm_external threadpool_external)
+FetchContent_MakeAvailable(pybind11 kenlm_external threadpool_external utf8_external)
 
 file(GLOB FST_SOURCES ${FST_DIR}/src/lib/*.cc ${FST_DIR}/src/script/*.cc)
 
-pybind11_add_module(_zctc SHARED ${CMAKE_SOURCE_DIR}/src/binding.cpp ${FST_SOURCES})
-include_directories(${CMAKE_SOURCE_DIR}/include ${pybind11_INCLUDE_DIR} ${PYTHON_INCLUDE_DIR} ${FST_DIR}/src/include ${FETCHCONTENT_BASE_DIR}/kenlm_external-src ${FETCHCONTENT_BASE_DIR}/threadpool_external-src)
+pybind11_add_module(_zctc SHARED ${CMAKE_SOURCE_DIR}/zctc/lib/binding.cpp ${FST_SOURCES})
+include_directories(
+    ${CMAKE_SOURCE_DIR}/zctc/include
+    ${pybind11_INCLUDE_DIR}
+    ${PYTHON_INCLUDE_DIR}
+    ${FST_DIR}/src/include
+    ${FETCHCONTENT_BASE_DIR}/kenlm_external-src
+    ${FETCHCONTENT_BASE_DIR}/threadpool_external-src
+    ${FETCHCONTENT_BASE_DIR}/utf8_external-src/source
+)
 
-target_link_libraries(_zctc PUBLIC ${PYTHON_LIBRARIES} kenlm_filter kenlm_builder kenlm_util kenlm pthread dl util)
+target_link_libraries(
+    _zctc PUBLIC
+    ${PYTHON_LIBRARIES}
+    kenlm_filter
+    kenlm_builder
+    kenlm_util
+    kenlm
+    pthread
+    dl
+    util
+)
 if(TARGET z)
     target_link_libraries(_zctc PUBLIC z)
 endif()
@@ -59,11 +82,18 @@ if(TARGET lzma)
 endif()
 
 install(TARGETS _zctc LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
-set_target_properties(_zctc kenlm_filter kenlm_builder kenlm_util kenlm PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${LIBRARY_OUTPUT_DIRECTORY})
+set_target_properties(
+    _zctc
+    kenlm_filter
+    kenlm_builder
+    kenlm_util
+    kenlm
+    PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${LIBRARY_OUTPUT_DIRECTORY}
+)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 
-    add_executable(zctc ${CMAKE_SOURCE_DIR}/src/main.cpp ${FST_SOURCES})
+    add_executable(zctc ${CMAKE_SOURCE_DIR}/zctc/bin/main.cpp ${FST_SOURCES})
     target_link_libraries(zctc PUBLIC ${PYTHON_LIBRARIES} kenlm_filter kenlm_builder kenlm_util kenlm pthread dl util)
     if(TARGET z)
         target_link_libraries(zctc PUBLIC z)
@@ -75,9 +105,15 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_link_libraries(zctc PUBLIC lzma)
     endif()
 
+    target_compile_options(
+        zctc PUBLIC
+        -fsanitize=address,undefined
+        -fsanitize-recover=all
+        -fsanitize-address-use-after-scope
+        -fno-omit-frame-pointer
+    )
     target_link_options(zctc PUBLIC -fsanitize=address,undefined -fsanitize=undefined)
-    target_link_options(_zctc PUBLIC -fsanitize=address,undefined -fsanitize=undefined)
     install(TARGETS zctc RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
-    set_target_properties(zctc PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${LIBRARY_OUTPUT_DIRECTORY})
+    # set_target_properties(zctc PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${LIBRARY_OUTPUT_DIRECTORY})
 
 endif()

@@ -2,7 +2,7 @@
 name = "zctc"
 version = "0.1.0"
 description = "A fast and efficient CTC beam decoder with C++ backend."
-authors = ["DurgaiVelSelvan <durgaivelselvan.mn@zohocorp.com>"]
+authors = ["DurgaiVelSelvan <durgaivel0309@gmail.com>"]
 readme = "README.md"
 build = "build.py"
 

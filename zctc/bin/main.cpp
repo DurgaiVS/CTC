@@ -1,7 +1,9 @@
 #include <chrono>
 #include <ctime>
+#include <fstream>
 #include <iostream>
 #include <numeric>
+#include <random>
 
 #include "zctc/decoder.hh"
 
@@ -61,6 +63,10 @@ debug_decoder()
 	std::cin >> iter_count;
 	std::cout << "Enter blank id: ";
 	std::cin >> blank_id;
+	std::cout << "Enter alpha[" << alpha << "]: ";
+	std::cin >> alpha;
+	std::cout << "Enter beta[" << beta << "]: ";
+	std::cin >> beta;
 
 	int apostrophe_id = load_vocab(vocab, vocab_path.c_str());
 
@@ -86,9 +92,9 @@ debug_decoder()
 	std::uniform_real_distribution<float> dist { 0.0f, 0.05f };
 	auto gen = [&dist, &mersenne_engine]() { return dist(mersenne_engine); };
 
-	for (int t = 0, temp = 0; t < iter_count; t++) {
+	for (int t = 1, temp = 0; t <= iter_count; t++) {
 
-		std::cout << "\rIteration: " << t + 1 << " / " << iter_count << " [" << duration.count() << " ms / it]"
+		std::cout << "\rIteration: " << t << " / " << iter_count << " [" << duration.count() << " ms / it]"
 				  << std::flush;
 		std::generate(logits.begin(), logits.end(), gen);
 
@@ -110,6 +116,7 @@ debug_decoder()
 		std::fill(timesteps.begin(), timesteps.end(), 0);
 		std::fill(seq_pos.begin(), seq_pos.end(), 0);
 	}
+	std::cout << std::endl;
 
 	return 0;
 }

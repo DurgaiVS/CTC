@@ -9,6 +9,7 @@ from io import BytesIO
 from pathlib import Path
 from sysconfig import get_paths
 from tempfile import TemporaryDirectory
+from typing import List
 
 import requests
 from setuptools import Extension, find_packages, setup
@@ -16,9 +17,9 @@ from setuptools.command.build_ext import build_ext
 
 
 class CMakeExtension(Extension):
-    def __init__(self, name, source_dir: Path):
+    def __init__(self, name, source_dir: Path, libraries: List[str] = []):
         # don't invoke the original build_ext for this special extension
-        super().__init__(name, sources=[])
+        super().__init__(name, sources=[], libraries=libraries)
         self.sourcedir = source_dir.resolve()
 
 
@@ -42,46 +43,61 @@ class CMakeBuild(build_ext):
 
         fst_v = "openfst-1.8.3"
         fst_url = f"https://www.openfst.org/twiki/pub/FST/FstDownload/{fst_v}.tar.gz"
-        tmp_dir = TemporaryDirectory()
-        res = requests.get(fst_url)
-        with tarfile.open(fileobj=BytesIO(res.content)) as tar:
-            tar.extractall(tmp_dir.name)
-        del res
 
-        # example of cmake args
-        config = "Debug" if self.debug else "Release"
-        cmake_args = [
-            "-DLIBRARY_OUTPUT_DIRECTORY=" + src_dir,
-            "-DCMAKE_BUILD_TYPE=" + config,
-            "-DPYTHON_INCLUDE_DIR=" + str(get_paths()["include"]),
-            "-DPYTHON_EXECUTABLE=" + str(sys.executable),
-            "-DCMAKE_INSTALL_PREFIX=" + str(build_temp),
-            "-DFST_DIR=" + str(Path(tmp_dir.name) / fst_v),
-        ]
+        with TemporaryDirectory() as tmp_dir:
+            res = requests.get(fst_url)
+            with tarfile.open(fileobj=BytesIO(res.content)) as tar:
+                tar.extractall(tmp_dir)
+            del res
 
-        # example of build args
-        build_args = ["--config", config, "--", "-j" + str(os.cpu_count())]
+            # example of cmake args
+            config = "Debug" if self.debug else "Release"
+            cmake_args = [
+                "-DLIBRARY_OUTPUT_DIRECTORY=" + src_dir,
+                "-DCMAKE_BUILD_TYPE=" + config,
+                "-DPYTHON_INCLUDE_DIR=" + str(get_paths()["include"]),
+                "-DPYTHON_EXECUTABLE=" + str(sys.executable),
+                "-DCMAKE_INSTALL_PREFIX=" + str(build_temp),
+                "-DFST_DIR=" + str(Path(tmp_dir) / fst_v),
+            ]
 
-        subprocess.run(
-            ["cmake", str(ext.sourcedir), *cmake_args], cwd=build_temp, check=True
-        )
-        subprocess.run(
-            ["cmake", "--build", ".", "--target", "install", *build_args],
-            cwd=build_temp,
-            check=True,
-        )
+            # example of build args
+            build_args = ["--config", config, "--", "-j" + str(os.cpu_count())]
 
-        tmp_dir.cleanup()
+            subprocess.run(
+                ["cmake", str(ext.sourcedir), *cmake_args], cwd=build_temp, check=True
+            )
+            subprocess.run(
+                ["cmake", "--build", ".", "--target", "install", *build_args],
+                cwd=build_temp,
+                check=True,
+            )
 
+            ext.library_dirs = [src_dir]
 
 setup(
     name="zctc",
     version="0.1",
     description="A fast and efficient CTC beam decoder with C++ backend.",
     author="Durgai Vel Selvan M",
-    author_email="durgaivelselvan.mn@zohocorp.com",
-    packages=find_packages(),
-    ext_modules=[CMakeExtension("_zctc", Path(__file__).parent)],
+    author_email="durgaivel0309@gmail.com",
+    packages=find_packages(str(Path(__file__).parent)),
+    # package_data={},
+    include_package_data=True,
+    # libraries=[],
+    ext_modules=[
+        CMakeExtension(
+            "_zctc",
+            Path(__file__).parent,
+            [
+                "_zctc",
+                "kenlm_filter",
+                "kenlm_builder",
+                "kenlm_util",
+                "kenlm"
+            ]
+        )
+    ],
     cmdclass={
         "build_ext": CMakeBuild,
     },

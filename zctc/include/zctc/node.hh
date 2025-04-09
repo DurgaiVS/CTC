@@ -14,7 +14,6 @@
 
 namespace zctc {
 
-template <typename T>
 class Node {
 public:
 	const bool is_clone, only_prev_b;
@@ -22,18 +21,18 @@ public:
 	const std::string token;
 
 	bool is_lex_path, is_start_of_word, is_hotpath, is_at_writer, is_deprecated;
-	int ts, b_ts, tk_ts, seq_length;
-	T tk_prob, b_prob, prev_b_score, squash_score, prev_score;
-	T max_prob, _max_prob, p_score, score, h_score, ext_score;
-	T _ext_score;
+	int ts, b_ts, tk_ts;
+	double tk_prob, b_prob, prev_b_score, squash_score, prev_score;
+	double max_prob, _max_prob, p_score, score, ovrl_score, lm_lex_score;
+	double hw_score;
 
-	Node<T>* parent;
+	Node* parent;
 	lm::ngram::State lm_state;
 	fst::StdVectorFst::StateId lexicon_state, hotword_state;
-	std::vector<Node<T>*> childs;
-	std::vector<Node<T>*>& alt_childs;
+	std::vector<Node*> childs;
+	std::vector<Node*>& alt_childs;
 
-	Node(int id, int ts, T prob, const std::string token, Node<T>* parent, bool only_prev_b = false)
+	Node(int id, int ts, double prob, const std::string token, Node* parent, bool only_prev_b = false)
 		: is_clone(false)
 		, only_prev_b(only_prev_b)
 		, id(id)
@@ -54,20 +53,18 @@ public:
 		, _max_prob(prob)
 		, p_score(0.0)
 		, score(0.0)
-		, h_score(0.0)
-		, ext_score(0.0)
+		, ovrl_score(0.0)
+		, lm_lex_score(0.0)
 		, prev_score(0.0)
-		, _ext_score(0.0)
+		, hw_score(0.0)
 		, parent(parent)
 		, alt_childs(this->childs)
 	{
 		if (this->parent == nullptr) {
-			this->seq_length = 0;
 			return;
 		}
 
-		this->seq_length = parent->seq_length + 1;
-		this->ext_score = parent->ext_score;
+		this->lm_lex_score = parent->lm_lex_score;
 
 		if (only_prev_b) {
 			this->p_score = parent->prev_score + parent->prev_b_score;
@@ -88,7 +85,7 @@ public:
 	 * 		 node, but the child of `parent`'s clone
 	 * 		 `source` node.
 	 */
-	Node(int ts, T prob, Node<T>* parent, Node<T>* ref)
+	Node(int ts, double prob, Node* parent, Node* ref)
 		: is_clone(true)
 		, only_prev_b(ref->only_prev_b)
 		, id(ref->id)
@@ -101,7 +98,6 @@ public:
 		, ts(ref->ts)
 		, b_ts(ref->b_ts)
 		, tk_ts(ref->tk_ts)
-		, seq_length(ref->seq_length)
 		, tk_prob(ref->tk_prob)
 		, b_prob(ref->b_prob)
 		, prev_b_score(ref->prev_b_score)
@@ -110,10 +106,10 @@ public:
 		, _max_prob(ref->_max_prob)
 		, p_score(ref->p_score)
 		, score(ref->score)
-		, h_score(ref->h_score)
-		, ext_score(ref->ext_score)
+		, ovrl_score(ref->ovrl_score)
+		, lm_lex_score(ref->lm_lex_score)
 		, prev_score(ref->prev_score)
-		, _ext_score(ref->_ext_score)
+		, hw_score(ref->hw_score)
 		, parent(parent)
 		, lm_state(ref->lm_state)
 		, lexicon_state(ref->lexicon_state)
@@ -137,7 +133,6 @@ public:
 		, ts(other.ts)
 		, b_ts(other.b_ts)
 		, tk_ts(other.tk_ts)
-		, seq_length(other.seq_length)
 		, tk_prob(other.tk_prob)
 		, b_prob(other.b_prob)
 		, prev_b_score(other.prev_b_score)
@@ -146,10 +141,10 @@ public:
 		, _max_prob(other._max_prob)
 		, p_score(other.p_score)
 		, score(other.score)
-		, h_score(other.h_score)
-		, ext_score(other.ext_score)
+		, ovrl_score(other.ovrl_score)
+		, lm_lex_score(other.lm_lex_score)
 		, prev_score(other.prev_score)
-		, _ext_score(other._ext_score)
+		, hw_score(other.hw_score)
 		, parent(other.parent)
 		, lm_state(other.lm_state) // TODO: Verify if the copy constructor is clean.
 		, lexicon_state(other.lexicon_state)
@@ -161,27 +156,27 @@ public:
 
 	~Node()
 	{
-		for (Node<T>* child : *this)
+		for (Node* child : *this)
 			delete child;
 	}
 
-	inline void acc_prob(T prob, std::vector<Node<T>*>& writer);
-	inline void acc_tk_and_parent_prob(T prob, std::vector<Node<T>*>& writer);
-	inline void acc_repeat_token_prob_for_cloned(int ts, T prob, Node<T>* r_node, std::vector<Node<T>*>& writer,
-												 std::vector<Node<T>*>& reader);
+	inline void acc_prob(double prob, std::vector<Node*>& writer);
+	inline void acc_tk_and_parent_prob(double prob, std::vector<Node*>& writer);
+	inline void acc_repeat_token_prob_for_cloned(int ts, double prob, Node* r_node, std::vector<Node*>& writer,
+												 std::vector<Node*>& reader);
 
-	T update_score(int curr_ts, std::vector<Node<T>*>& more_confident_repeats);
+	double update_score(int curr_ts, std::vector<Node*>& more_confident_repeats);
 
-	inline Node<T>* acc_repeat_token_prob(int ts, T prob, std::vector<Node<T>*>& writer, std::vector<Node<T>*>& reader);
+	inline Node* acc_repeat_token_prob(int ts, double prob, std::vector<Node*>& writer, std::vector<Node*>& reader);
 
-	Node<T>* extend_path(int id, int ts, T prob, const std::string token, std::vector<Node<T>*>& writer,
-						 std::vector<Node<T>*>& reader);
+	Node* extend_path(int id, int ts, double prob, const std::string token, std::vector<Node*>& writer,
+					  std::vector<Node*>& reader);
 
 	// element-wise iterator for this class,
-	typename std::vector<Node<T>*>::iterator begin() noexcept { return this->childs.begin(); }
-	typename std::vector<Node<T>*>::iterator end() noexcept { return this->childs.end(); }
-	typename std::vector<Node<T>*>::const_iterator cbegin() const noexcept { return this->childs.cbegin(); }
-	typename std::vector<Node<T>*>::const_iterator cend() const noexcept { return this->childs.cend(); }
+	typename std::vector<Node*>::iterator begin() noexcept { return this->childs.begin(); }
+	typename std::vector<Node*>::iterator end() noexcept { return this->childs.end(); }
+	typename std::vector<Node*>::const_iterator cbegin() const noexcept { return this->childs.cbegin(); }
+	typename std::vector<Node*>::const_iterator cend() const noexcept { return this->childs.cend(); }
 };
 
 } // namespace zctc
@@ -229,7 +224,6 @@ log_diff_exp(T x, T y)
  * 		  be called only once per timestep and also at the end of parsing the timestep
  * 		  logits.
  *
- * @tparam T The type of the node's probs.
  * @param curr_ts The current timestep.
  * @param more_confident_repeats The vector to store the more confident repeat tokens, since
  * 								 the more confident repeat nodes were created here to take
@@ -238,9 +232,8 @@ log_diff_exp(T x, T y)
  *
  * @return The updated score of the node.
  */
-template <typename T>
-T
-zctc::Node<T>::update_score(int curr_ts, std::vector<zctc::Node<T>*>& more_confident_repeats)
+double
+zctc::Node::update_score(int curr_ts, std::vector<zctc::Node*>& more_confident_repeats)
 {
 	/*
 		In case, if a node encounters a blank and a repeat token
@@ -258,7 +251,7 @@ zctc::Node<T>::update_score(int curr_ts, std::vector<zctc::Node<T>*>& more_confi
 			// This is a more confident repeat token,
 			// so, we'll create a new node and update the
 			// score with the most confident probability.
-			Node<T>* node = new Node<T>(*this);
+			Node* node = new Node(*this);
 			more_confident_repeats.emplace_back(node);
 
 			node->tk_prob = node->_max_prob;
@@ -283,7 +276,7 @@ zctc::Node<T>::update_score(int curr_ts, std::vector<zctc::Node<T>*>& more_confi
 		`*_prob` will be in linear scale,
 		`*_score, ` will be in log scale,
 	*/
-	T prev_score = this->score;
+	double prev_score = this->score;
 	this->score = prev_score + std::log(this->tk_prob + this->b_prob);
 
 	if ((this->prev_b_score != 0.0) && this->tk_prob != 0.0) {
@@ -294,7 +287,7 @@ zctc::Node<T>::update_score(int curr_ts, std::vector<zctc::Node<T>*>& more_confi
 		this->squash_score = 0.0;
 	}
 
-	this->h_score = this->score + this->ext_score + this->_ext_score;
+	this->ovrl_score = this->score + this->lm_lex_score + this->hw_score;
 	this->prev_score = prev_score;
 
 	if (this->tk_prob != 0.0) {
@@ -311,7 +304,7 @@ zctc::Node<T>::update_score(int curr_ts, std::vector<zctc::Node<T>*>& more_confi
 	}
 
 	this->is_at_writer = false;
-	return this->h_score;
+	return this->ovrl_score;
 }
 
 /**
@@ -319,15 +312,13 @@ zctc::Node<T>::update_score(int curr_ts, std::vector<zctc::Node<T>*>& more_confi
  * 		  is more confident than the node's probability, then this value is cached
  * 		  in `_max_prob` and updated during `update_score` function.
  *
- * @tparam T The type of the node's probs.
  * @param prob The token probability to be accumulated.
  * @param writer The vector to store the nodes to be written to the next timestep.
  *
  * @return void
  */
-template <typename T>
 void
-zctc::Node<T>::acc_prob(T prob, std::vector<zctc::Node<T>*>& writer)
+zctc::Node::acc_prob(double prob, std::vector<zctc::Node*>& writer)
 {
 	/*
 	NOTE: Instead of creating a duplicate when we encounter a more
@@ -370,15 +361,13 @@ zctc::Node<T>::acc_prob(T prob, std::vector<zctc::Node<T>*>& writer)
  * 		  to the node, and if the probability is more confident than the node's probability,
  * 		  then this value is cached in `_max_prob` and updated during `update_score` function.
  *
- * @tparam T The type of the node's probs.
  * @param prob The token probability to be accumulated.
  * @param writer The vector to store the nodes to be written to the next timestep.
  *
  * @return void
  */
-template <typename T>
 void
-zctc::Node<T>::acc_tk_and_parent_prob(T prob, std::vector<zctc::Node<T>*>& writer)
+zctc::Node::acc_tk_and_parent_prob(double prob, std::vector<zctc::Node*>& writer)
 {
 	if (!this->is_at_writer) {
 		writer.emplace_back(this);
@@ -397,7 +386,7 @@ zctc::Node<T>::acc_tk_and_parent_prob(T prob, std::vector<zctc::Node<T>*>& write
 		this->tk_prob = prob;
 
 	} else if (this->only_prev_b) {
-		T p_score = this->parent->prev_score + this->parent->prev_b_score;
+		double p_score = this->parent->prev_score + this->parent->prev_b_score;
 
 		if (this->p_score != p_score) {
 			this->p_score = p_score;
@@ -417,7 +406,6 @@ zctc::Node<T>::acc_tk_and_parent_prob(T prob, std::vector<zctc::Node<T>*>& write
  * 		  reference node is not the direct child of `this` node, but the child
  * 		  of the clone `source` node.
  *
- * @tparam T The type of the node's probs.
  * @param ts The timestep of the token.
  * @param prob The token probability to be accumulated.
  * @param r_node The reference node.
@@ -426,14 +414,12 @@ zctc::Node<T>::acc_tk_and_parent_prob(T prob, std::vector<zctc::Node<T>*>& write
  *
  * @return void
  */
-template <typename T>
 void
-zctc::Node<T>::acc_repeat_token_prob_for_cloned(int ts, T prob, zctc::Node<T>* r_node,
-												std::vector<zctc::Node<T>*>& writer,
-												std::vector<zctc::Node<T>*>& reader)
+zctc::Node::acc_repeat_token_prob_for_cloned(int ts, double prob, zctc::Node* r_node, std::vector<zctc::Node*>& writer,
+											 std::vector<zctc::Node*>& reader)
 {
 
-	zctc::Node<T>* child;
+	zctc::Node* child;
 	if (r_node->childs.size() == 0) {
 		// Delete this r_node ref from the alt_childs list.
 		child = r_node;
@@ -446,7 +432,7 @@ zctc::Node<T>::acc_repeat_token_prob_for_cloned(int ts, T prob, zctc::Node<T>* r
 		std::iter_swap(std::find(this->alt_childs.begin(), this->alt_childs.end(), r_node), this->alt_childs.end() - 1);
 		this->alt_childs.erase(this->alt_childs.end() - 1);
 	} else {
-		child = new zctc::Node<T>(ts, prob, this, r_node);
+		child = new zctc::Node(ts, prob, this, r_node);
 		std::replace(reader.begin(), reader.end(), r_node, child);
 		if (r_node->is_at_writer) {
 			std::replace(writer.begin(), writer.end(), r_node, child);
@@ -474,7 +460,6 @@ zctc::Node<T>::acc_repeat_token_prob_for_cloned(int ts, T prob, zctc::Node<T>* r
  * 		  last encounterence of the token and blank, whether the path should be
  * 		  extended or not is decided.
  *
- * @tparam T The type of the node's probs.
  * @param ts The timestep of the token.
  * @param prob The token probability to be accumulated.
  * @param writer The vector to store the nodes to be written to the next timestep.
@@ -482,10 +467,9 @@ zctc::Node<T>::acc_repeat_token_prob_for_cloned(int ts, T prob, zctc::Node<T>* r
  *
  * @return The child node if the path is extended, else `nullptr`.
  */
-template <typename T>
-zctc::Node<T>*
-zctc::Node<T>::acc_repeat_token_prob(int ts, T prob, std::vector<zctc::Node<T>*>& writer,
-									 std::vector<zctc::Node<T>*>& reader)
+zctc::Node*
+zctc::Node::acc_repeat_token_prob(int ts, double prob, std::vector<zctc::Node*>& writer,
+								  std::vector<zctc::Node*>& reader)
 {
 	/*
 	NOTE: In case, if the token is the most recent than the blank, or,
@@ -521,7 +505,7 @@ zctc::Node<T>::acc_repeat_token_prob(int ts, T prob, std::vector<zctc::Node<T>*>
 			  Not sure if this case is possible or not, but just wanted to
 			  ensure that we are not creating duplicate child nodes.
 		*/
-		for (zctc::Node<T>* r_node : *this) {
+		for (zctc::Node* r_node : *this) {
 			if ((r_node->id != id) || r_node->is_deprecated)
 				continue;
 
@@ -534,7 +518,7 @@ zctc::Node<T>::acc_repeat_token_prob(int ts, T prob, std::vector<zctc::Node<T>*>
 			NOTE: If this is a cloned node, then we'll look
 				for the `source` node's child list too.
 			*/
-			for (Node<T>* r_node : this->alt_childs) {
+			for (Node* r_node : this->alt_childs) {
 				if ((r_node->id != id) || r_node->is_deprecated)
 					continue;
 
@@ -550,7 +534,7 @@ zctc::Node<T>::acc_repeat_token_prob(int ts, T prob, std::vector<zctc::Node<T>*>
 			  node has both `blank` and `token` encountered previously, then
 			  we'll only consider the previous `blank`.
 		*/
-		zctc::Node<T>* child = new zctc::Node<T>(id, ts, prob, token, this, true);
+		zctc::Node* child = new zctc::Node(id, ts, prob, token, this, true);
 
 		this->childs.emplace_back(child);
 		writer.emplace_back(child);
@@ -569,7 +553,6 @@ zctc::Node<T>::acc_repeat_token_prob(int ts, T prob, std::vector<zctc::Node<T>*>
  * 		  in the child node too. And based on the last encounterence of the token and blank,
  * 		  whether the path should be extended or not is decided.
  *
- * @tparam T The type of the node's probs.
  * @param id The id of the token to be extended.
  * @param ts The timestep of the token.
  * @param prob The token probability to be accumulated.
@@ -579,15 +562,14 @@ zctc::Node<T>::acc_repeat_token_prob(int ts, T prob, std::vector<zctc::Node<T>*>
  *
  * @return The child node if the path is extended, else `nullptr`.
  */
-template <typename T>
-zctc::Node<T>*
-zctc::Node<T>::extend_path(int id, int ts, T prob, const std::string token, std::vector<zctc::Node<T>*>& writer,
-						   std::vector<zctc::Node<T>*>& reader)
+zctc::Node*
+zctc::Node::extend_path(int id, int ts, double prob, const std::string token, std::vector<zctc::Node*>& writer,
+						std::vector<zctc::Node*>& reader)
 {
 	if (id == this->id)
 		return this->acc_repeat_token_prob(ts, prob, writer, reader);
 
-	for (Node<T>* r_node : *this) {
+	for (Node* r_node : *this) {
 		if ((r_node->id != id) || r_node->is_deprecated)
 			continue;
 
@@ -611,7 +593,7 @@ zctc::Node<T>::extend_path(int id, int ts, T prob, const std::string token, std:
 		NOTE: If this is a cloned node, then we'll look
 			  for the `source` node's child list too.
 		*/
-		for (Node<T>* r_node : this->alt_childs) {
+		for (Node* r_node : this->alt_childs) {
 			if ((r_node->id != id) || r_node->is_deprecated)
 				continue;
 
@@ -624,7 +606,7 @@ zctc::Node<T>::extend_path(int id, int ts, T prob, const std::string token, std:
 	NOTE: If the current node has no child with the provided id,
 		  then we can create a new child node and extend the path.
 	*/
-	zctc::Node<T>* child = new zctc::Node<T>(id, ts, prob, token, this);
+	zctc::Node* child = new zctc::Node(id, ts, prob, token, this);
 
 	this->childs.emplace_back(child);
 	writer.emplace_back(child);

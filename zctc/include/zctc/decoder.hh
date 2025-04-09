@@ -1,10 +1,11 @@
 #ifndef _ZCTC_DECODER_H
 #define _ZCTC_DECODER_H
 
-#include <ThreadPool.h>
-#include <pybind11/numpy.h>
-#include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
+#include "ThreadPool.h"
+#include "pybind11/numpy.h"
+#include "pybind11/pybind11.h"
+#include "pybind11/stl.h"
+#include "utf8.h"
 
 #include "./ext_scorer.hh"
 #include "./node.hh"
@@ -16,8 +17,7 @@ namespace zctc {
 
 class Decoder {
 public:
-	template <typename T>
-	static bool descending_compare(zctc::Node<T>* x, zctc::Node<T>* y);
+	static bool descending_compare(zctc::Node* x, zctc::Node* y);
 
 	const int thread_count, blank_id, cutoff_top_n, vocab_size;
 	const double nucleus_prob_per_timestep, min_tok_prob, max_beam_score_deviation;
@@ -69,9 +69,8 @@ public:
  *
  * @return void
  */
-template <typename T>
 inline void
-move_clones_to_start(std::vector<zctc::Node<T>*>& source)
+move_clones_to_start(std::vector<zctc::Node*>& source)
 {
 	for (int from_pos = 0, to_pos = 0; from_pos < source.size(); from_pos++) {
 		if (!source[from_pos]->is_clone)
@@ -93,9 +92,8 @@ move_clones_to_start(std::vector<zctc::Node<T>*>& source)
  *
  * @return void
  */
-template <typename T>
 inline void
-remove_from_source(std::vector<zctc::Node<T>*>& source, std::vector<int>& remove_ids)
+remove_from_source(std::vector<zctc::Node*>& source, std::vector<int>& remove_ids)
 {
 	int to_pos = source.size() - 1;
 
@@ -135,16 +133,15 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 {
 	bool is_blank, full_beam;
 	int iter_val, pos_val;
-	T nucleus_max, nucleus_count, prob, b_prob, max_beam_score, min_beam_score, beam_score;
+	double nucleus_count, prob, max_beam_score, min_beam_score, beam_score;
 	int *curr_id, *curr_l, *curr_t, *curr_p;
-	zctc::Node<T>* child;
+	zctc::Node* child;
 	std::vector<int> writer_remove_ids;
-	std::vector<zctc::Node<T>*> prefixes0, prefixes1, more_confident_repeats;
-	zctc::Node<T> root(zctc::ROOT_ID, -1, 0.0, "<s>", nullptr);
+	std::vector<zctc::Node*> prefixes0, prefixes1, more_confident_repeats;
+	zctc::Node root(zctc::ROOT_ID, -1, 0.0, "<s>", nullptr);
 	fst::SortedMatcher<fst::StdVectorFst> lexicon_matcher(decoder->ext_scorer.lexicon, fst::MATCH_INPUT);
 	fst::SortedMatcher<fst::StdVectorFst> hotwords_matcher(hotwords_fst, fst::MATCH_INPUT);
 
-	nucleus_max = static_cast<T>(decoder->nucleus_prob_per_timestep);
 	decoder->ext_scorer.initialise_start_states(&root, hotwords_fst);
 
 	/*
@@ -162,31 +159,34 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 		Note: Swap the reader and writer vectors, as per the timestep,
 			  to avoid cleaning and copying the elements.
 		*/
-		std::vector<zctc::Node<T>*>& reader = ((timestep % 2) == 0 ? prefixes0 : prefixes1);
-		std::vector<zctc::Node<T>*>& writer = ((timestep % 2) == 0 ? prefixes1 : prefixes0);
+		std::vector<zctc::Node*>& reader = ((timestep % 2) == 0 ? prefixes0 : prefixes1);
+		std::vector<zctc::Node*>& writer = ((timestep % 2) == 0 ? prefixes1 : prefixes0);
 
 		nucleus_count = 0;
 		iter_val = timestep * decoder->vocab_size;
 		curr_id = ids + iter_val;
-		full_beam = reader.size() >= decoder->beam_width;
+		full_beam = (reader.size() >= decoder->beam_width) && decoder->ext_scorer.enabled;
+		move_clones_to_start(reader);
 
 		if (full_beam) {
 			/*
 			NOTE: Parlance style of pruning the node extensions
 				  based on their score.
 			*/
-			min_beam_score = std::numeric_limits<T>::max();
-			for (zctc::Node<T>* r_node : reader) {
-				if (r_node->h_score < min_beam_score)
-					min_beam_score = r_node->h_score;
+			min_beam_score = std::numeric_limits<double>::max();
+			for (zctc::Node* r_node : reader) {
+				if (r_node->ovrl_score < min_beam_score)
+					min_beam_score = r_node->ovrl_score;
 			}
 
-			b_prob = logits[iter_val + decoder->blank_id];
-			min_beam_score = min_beam_score + std::log(b_prob) - decoder->ext_scorer.beta;
+			min_beam_score += std::log(logits[iter_val + decoder->blank_id]) - std::abs(decoder->ext_scorer.beta);
+		} else {
+			min_beam_score = std::numeric_limits<double>::lowest();
 		}
 
 		for (int i = 0, index = 0; i < decoder->cutoff_top_n; i++, curr_id++) {
 			index = *curr_id;
+			// NOTE: Implict type_casting from `T` to `double`.
 			prob = logits[iter_val + index];
 
 			if (prob < decoder->min_tok_prob)
@@ -200,7 +200,7 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 				Note: Just update the blank probs of the node and
 					  continue in case if the current is blank token.
 				*/
-				for (zctc::Node<T>* r_node : reader) {
+				for (zctc::Node* r_node : reader) {
 					r_node->b_prob = prob;
 					if (!r_node->is_at_writer) {
 						writer.emplace_back(r_node);
@@ -211,7 +211,7 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 				continue;
 			}
 
-			for (zctc::Node<T>* r_node : reader) {
+			for (zctc::Node* r_node : reader) {
 				/*
 				NOTE: Parlance style will be just accumulating
 					  the token probs, but we've included the blank
@@ -220,7 +220,7 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 					  but we update score only at the end of each timestep
 					  parsing.
 				*/
-				if (full_beam && ((r_node->h_score + std::log(prob + b_prob)) < min_beam_score))
+				if (full_beam && ((r_node->ovrl_score + std::log(prob)) < min_beam_score))
 					break;
 
 				child = r_node->extend_path(index, timestep, prob, decoder->vocab[index], writer, reader);
@@ -242,15 +242,15 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 				decoder->ext_scorer.run_ext_scoring(child, &lexicon_matcher, hotwords_fst, &hotwords_matcher);
 			}
 
-			if (nucleus_count >= nucleus_max)
+			if (nucleus_count >= decoder->nucleus_prob_per_timestep)
 				break;
 		}
 
 		pos_val = -1;
-		max_beam_score = std::numeric_limits<T>::lowest();
-		for (zctc::Node<T>* w_node : writer) {
+		max_beam_score = std::numeric_limits<double>::lowest();
+		for (zctc::Node* w_node : writer) {
 			/*
-			NOTE: Updating the `score` and `h_score` of the
+			NOTE: Updating the `score` and `ovrl_score` of the
 				  nodes, considering the AM probs, KenLM probs,
 				  lexicon penalty, hotword boosting values and
 				  beta word penalty.
@@ -284,44 +284,39 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 		}
 
 		remove_from_source(writer, writer_remove_ids);
-		for (zctc::Node<T>* repeat_node : more_confident_repeats) {
+		for (zctc::Node* repeat_node : more_confident_repeats) {
 			writer.emplace_back(repeat_node);
 		}
 		more_confident_repeats.clear();
 
 		reader.clear();
-		if (writer.size() <= decoder->beam_width) {
-			move_clones_to_start(writer);
+		if (writer.size() <= decoder->beam_width)
 			continue;
-		}
 
 		pos_val = 0;
 		beam_score = max_beam_score + decoder->max_beam_score_deviation;
-		for (zctc::Node<T>* w_node : writer) {
-			if (w_node->h_score < beam_score)
+		for (zctc::Node* w_node : writer) {
+			if (w_node->ovrl_score < beam_score)
 				writer_remove_ids.emplace_back(pos_val);
 
 			pos_val++;
 		}
 		remove_from_source(writer, writer_remove_ids);
-
-		if (writer.size() <= decoder->beam_width) {
-			move_clones_to_start(writer);
+		if (writer.size() <= decoder->beam_width)
 			continue;
-		}
 
 		std::nth_element(writer.begin(), writer.begin() + decoder->beam_width, writer.end(),
-						 Decoder::descending_compare<T>);
+						 Decoder::descending_compare);
+		// TODO: Try `resize()` instead of `erase()`, to avoid memory issue during benchmarking.
 		writer.erase(writer.begin() + decoder->beam_width, writer.end());
-		move_clones_to_start(writer);
 	}
 
-	std::vector<zctc::Node<T>*>& reader = ((seq_len % 2) == 0 ? prefixes0 : prefixes1);
-	std::sort(reader.begin(), reader.end(), Decoder::descending_compare<T>);
+	std::vector<zctc::Node*>& reader = ((seq_len % 2) == 0 ? prefixes0 : prefixes1);
+	std::sort(reader.begin(), reader.end(), Decoder::descending_compare);
 
 	iter_val = 1;
 	curr_p = seq_pos;
-	for (zctc::Node<T>* r_node : reader) {
+	for (zctc::Node* r_node : reader) {
 
 		curr_t = timestep + ((max_seq_len * iter_val) - 1);
 		curr_l = label + ((max_seq_len * iter_val) - 1);
@@ -352,22 +347,20 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 /* ---------------------------------------------------------------------------- */
 
 /**
- * @brief Compares the two nodes based on the `h_score` and `seq_length`,
- * 		  considering higher `h_score` and lower `seq_length` as the best.
+ * @brief Compares the two nodes based on the `ovrl_score` and `seq_length`,
+ * 		  considering higher `ovrl_score` and lower `seq_length` as the best.
  *
- * @tparam T The type of the node's probs.
  * @param x The first node to be compared.
  * @param y The second node to be compared.
  *
  * @return `true` If the first node is better than the second node.
  * @return `false` If the second node is better than the first node.
  */
-template <typename T>
 bool
-zctc::Decoder::descending_compare(zctc::Node<T>* x, zctc::Node<T>* y)
+zctc::Decoder::descending_compare(zctc::Node* x, zctc::Node* y)
 {
 	// NOTE: If probabilities are same, then we'll consider shorter sequences.
-	return x->h_score != y->h_score ? x->h_score > y->h_score : x->seq_length < y->seq_length;
+	return x->ovrl_score > y->ovrl_score; // ? x->ovrl_score > y->ovrl_score : x->seq_length < y->seq_length;
 }
 
 /**

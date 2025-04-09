@@ -10,18 +10,17 @@ namespace zctc {
 
 class ExternalScorer {
 public:
+	const bool enabled;
 	const char tok_sep;
 	const int apostrophe_id;
 	const double alpha, beta, lex_penalty;
 	lm::base::Model* lm;
 	fst::StdVectorFst* lexicon;
 
-	/*
-	NOTE: The `alpha` passed here should be in log(base 10) scale.
-	*/
 	ExternalScorer(char tok_sep, int apostrophe_id, double alpha, double beta, double lex_penalty, char* lm_path,
 				   char* lexicon_path)
-		: tok_sep(tok_sep)
+		: enabled(lm_path || lexicon_path)
+		, tok_sep(tok_sep)
 		, apostrophe_id(apostrophe_id)
 		, alpha(alpha)
 		, beta(beta)
@@ -46,14 +45,10 @@ public:
 			delete this->lexicon;
 	}
 
-	template <typename T>
-	inline void start_of_word_check(Node<T>* node, fst::StdVectorFst* hotwords_fst) const;
+	inline void start_of_word_check(Node* node, fst::StdVectorFst* hotwords_fst) const;
+	inline void initialise_start_states(Node* root, fst::StdVectorFst* hotwords_fst) const;
 
-	template <typename T>
-	inline void initialise_start_states(Node<T>* root, fst::StdVectorFst* hotwords_fst) const;
-
-	template <typename T>
-	void run_ext_scoring(zctc::Node<T>* node, fst::SortedMatcher<fst::StdVectorFst>* lexicon_matcher,
+	void run_ext_scoring(zctc::Node* node, fst::SortedMatcher<fst::StdVectorFst>* lexicon_matcher,
 						 fst::StdVectorFst* hotwords_fst,
 						 fst::SortedMatcher<fst::StdVectorFst>* hotwords_matcher) const;
 };
@@ -69,15 +64,13 @@ public:
  * 		  the token which is not a subword token, and not an apostrophe
  * 		  token, and not child of an apostrophe token.
  *
- * @tparam T The type of the node's probs.
  * @param node The node for which the start of word check is to be done.
  * @param hotwords_fst Initialise the start of word hotword state for the node from this FST.
  *
  * @return void
  */
-template <typename T>
 void
-zctc::ExternalScorer::start_of_word_check(Node<T>* node, fst::StdVectorFst* hotwords_fst) const
+zctc::ExternalScorer::start_of_word_check(zctc::Node* node, fst::StdVectorFst* hotwords_fst) const
 {
 	node->is_start_of_word = !(node->id == this->apostrophe_id || node->parent->id == this->apostrophe_id
 							   || node->token.at(0) == this->tok_sep);
@@ -96,15 +89,13 @@ zctc::ExternalScorer::start_of_word_check(Node<T>* node, fst::StdVectorFst* hotw
  * @brief Initialise the start states for the provided node, for the lexicon,
  * 		  language model and hotwords FSTs.
  *
- * @tparam T The type of the node's probs.
  * @param root The node for which the start states are to be initialised.
  * @param hotwords_fst Initialise the start of word hotword state for the node from this FST.
  *
  * @return void
  */
-template <typename T>
 void
-zctc::ExternalScorer::initialise_start_states(Node<T>* root, fst::StdVectorFst* hotwords_fst) const
+zctc::ExternalScorer::initialise_start_states(zctc::Node* root, fst::StdVectorFst* hotwords_fst) const
 {
 	if (this->lexicon)
 		root->lexicon_state = this->lexicon->Start();
@@ -121,7 +112,6 @@ zctc::ExternalScorer::initialise_start_states(Node<T>* root, fst::StdVectorFst* 
  * 		  language model, lexicon, hotwords FSTs and beta word penalty
  * 		  using the external scorer parameters.
  *
- * @tparam T The type of the node's probs.
  * @param node The node for which the external scoring is to be done.
  * @param lexicon_matcher The lexicon matcher to be used for lexicon searching.
  * @param hotwords_fst The hotwords FST to be used for hotword scoring.
@@ -129,9 +119,8 @@ zctc::ExternalScorer::initialise_start_states(Node<T>* root, fst::StdVectorFst* 
  *
  * @return void
  */
-template <typename T>
 void
-zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* node, fst::SortedMatcher<fst::StdVectorFst>* lexicon_matcher,
+zctc::ExternalScorer::run_ext_scoring(zctc::Node* node, fst::SortedMatcher<fst::StdVectorFst>* lexicon_matcher,
 									  fst::StdVectorFst* hotwords_fst,
 									  fst::SortedMatcher<fst::StdVectorFst>* hotwords_matcher) const
 {
@@ -141,7 +130,7 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* node, fst::SortedMatcher<fs
 		lm::WordIndex word_id = this->lm->BaseVocabulary().Index(node->token);
 
 		if (word_id == this->lm->BaseVocabulary().NotFound()) {
-			node->ext_score += -1000; // OOV char
+			node->lm_lex_score += -1000; // OOV char
 		} else {
 			/*
 			NOTE: Since KenLM returns the log probability with base 10,
@@ -149,9 +138,10 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* node, fst::SortedMatcher<fs
 
 				logb(x) = loga(x) / loga(b)
 			*/
-			node->ext_score
-				+= this->alpha
-				   * (this->lm->BaseScore(&(node->parent->lm_state), word_id, &(node->lm_state)) / zctc::LOG_A_OF_B);
+			node->lm_lex_score
+				+= (this->alpha
+					* (this->lm->BaseScore(&(node->parent->lm_state), word_id, &(node->lm_state)) / zctc::LOG_A_OF_B))
+				   + this->beta;
 		}
 	}
 
@@ -165,7 +155,7 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* node, fst::SortedMatcher<fs
 		if (!(node->parent->is_lex_path || node->is_start_of_word)) {
 
 			node->is_lex_path = false;
-			node->ext_score += this->lex_penalty;
+			node->lm_lex_score += this->lex_penalty;
 
 		} else {
 
@@ -178,7 +168,7 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* node, fst::SortedMatcher<fs
 				node->is_lex_path = true;
 			} else {
 				node->is_lex_path = false;
-				node->ext_score += this->lex_penalty;
+				node->lm_lex_score += this->lex_penalty;
 			}
 		}
 	}
@@ -202,12 +192,10 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* node, fst::SortedMatcher<fs
 				arc.olabel is the token length so far in the hotword,
 				arc.weight.Value() is the weight for each hotword token.
 			*/
-			node->_ext_score += (arc.olabel * arc.weight.Value());
+			node->hw_score = (arc.olabel * arc.weight.Value());
 			node->is_hotpath = true;
 		}
 	}
-
-	node->_ext_score += this->beta; // (this->beta * node->seq_length);
 }
 
 #endif // _ZCTC_EXT_SCORER_H
