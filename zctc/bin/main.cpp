@@ -36,6 +36,44 @@ load_vocab(std::vector<std::string>& vocab, const char* vocab_path)
 	return apostrophe_id;
 }
 
+template <typename T>
+void
+normalise(std::vector<T>& logits)
+{
+	T sum = 0, max = *std::max_element(logits.begin(), logits.end());
+	for (T& i : logits) {
+		i = i - max;
+		sum += i;
+	}
+	for (T& i : logits) {
+		i /= sum;
+	}
+}
+
+template <typename T>
+void
+normalise(T* logits, int size)
+{
+	T sum = 0, max = std::numeric_limits<T>::lowest();
+	T* temp = logits;
+	for (int i = 0; i < size; i++, temp++) {
+		if (*temp > max)
+			max = *temp;
+	}
+
+	temp = logits;
+	for (int i = 0; i < size; i++, temp++) {
+		*temp = *temp - max;
+		sum += *temp;
+	}
+
+	temp = logits;
+	for (int i = 0; i < size; i++, temp++) {
+		*temp = *temp / sum;
+	}
+}
+
+
 /**
  * @brief Test the decoder with random logits.
  *
@@ -89,7 +127,8 @@ debug_decoder()
 	std::chrono::milliseconds duration(0);
 	std::random_device rnd_device;
 	std::mt19937 mersenne_engine { rnd_device() };
-	std::uniform_real_distribution<float> dist { 0.0f, 0.05f };
+	// std::uniform_real_distribution<float> dist { 0.0f, 0.05f };
+	std::normal_distribution<float> dist { 0.1f, 3.0f };
 	auto gen = [&dist, &mersenne_engine]() { return dist(mersenne_engine); };
 
 	for (int t = 1, temp = 0; t <= iter_count; t++) {
@@ -101,6 +140,7 @@ debug_decoder()
 		// To get the sorted indices for the logits, timesteps wise
 		for (int i = 0; i < seq_len; i++) {
 			temp = i * decoder.vocab_size;
+			normalise(logits.data() + temp, decoder.vocab_size);
 			std::iota(sorted_indices.begin() + temp, sorted_indices.begin() + (temp + decoder.vocab_size), 0);
 			std::stable_sort(sorted_indices.begin() + temp, sorted_indices.begin() + (temp + decoder.vocab_size),
 							 [&logits, &temp](int a, int b) { return logits[temp + a] > logits[temp + b]; });

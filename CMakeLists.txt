@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.5)
 
-project(ZCTC)
+project(ZCTC CXX)
+# project(ZCTC VERSION 0.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(BUILD_SHARED_LIBS ON)
@@ -94,26 +95,33 @@ set_target_properties(
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 
     add_executable(zctc ${CMAKE_SOURCE_DIR}/zctc/bin/main.cpp ${FST_SOURCES})
+    add_executable(zctc-asan ${CMAKE_SOURCE_DIR}/zctc/bin/main.cpp ${FST_SOURCES})
+
     target_link_libraries(zctc PUBLIC ${PYTHON_LIBRARIES} kenlm_filter kenlm_builder kenlm_util kenlm pthread dl util)
+    target_link_libraries(zctc-asan PUBLIC ${PYTHON_LIBRARIES} kenlm_filter kenlm_builder kenlm_util kenlm pthread dl util)
+
     if(TARGET z)
         target_link_libraries(zctc PUBLIC z)
+        target_link_libraries(zctc-asan PUBLIC z)
     endif()
     if(TARGET bz2)
         target_link_libraries(zctc PUBLIC bz2)
+        target_link_libraries(zctc-asan PUBLIC bz2)
     endif()
     if(TARGET lzma)
         target_link_libraries(zctc PUBLIC lzma)
+        target_link_libraries(zctc-asan PUBLIC lzma)
     endif()
 
     target_compile_options(
-        zctc PUBLIC
+        zctc-asan PUBLIC
         -fsanitize=address,undefined
         -fsanitize-recover=all
         -fsanitize-address-use-after-scope
         -fno-omit-frame-pointer
     )
-    target_link_options(zctc PUBLIC -fsanitize=address,undefined -fsanitize=undefined)
-    install(TARGETS zctc RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
+    target_link_options(zctc-asan PUBLIC -fsanitize=address -fsanitize=undefined)
+    install(TARGETS zctc zctc-asan RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
     # set_target_properties(zctc PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${LIBRARY_OUTPUT_DIRECTORY})
 
 endif()

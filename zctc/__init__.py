@@ -112,6 +112,7 @@ class CTCDecoder(_Decoder):
             torch.argsort(logits, dim=2, descending=True)
             .detach()
             .to("cpu", torch.int32)
+            .contiguous()
             .numpy()
         )
         labels = torch.empty((batch_size, self.beam_width, seq_len), dtype=torch.int32)
@@ -119,6 +120,19 @@ class CTCDecoder(_Decoder):
             (batch_size, self.beam_width, seq_len), dtype=torch.int32
         )
         seq_pos = torch.empty((batch_size, self.beam_width), dtype=torch.int32)
+
+
+        if not logits.is_contiguous():
+            logits = logits.contiguous()
+        if not seq_lens.is_contiguous():
+            seq_lens = seq_lens.contiguous()
+        if not labels.is_contiguous():
+            labels = labels.contiguous()
+        if not timesteps.is_contiguous():
+            timesteps = timesteps.contiguous()
+        if not seq_pos.is_contiguous():
+            seq_pos = seq_pos.contiguous()
+
 
         self.batch_decode(
             logits.detach().cpu().numpy(),
