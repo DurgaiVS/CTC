@@ -4,7 +4,7 @@ import logging
 from typing import Optional, Tuple, Union
 
 import torch
-from _zctc import _ZFST, _Decoder, _FST
+from _zctc import _ZFST, _Decoder, _Fst
 
 
 def _get_apostrophe_id_from_vocab(vocab: list[str]) -> int:
@@ -83,7 +83,7 @@ class CTCDecoder(_Decoder):
         seq_lens: torch.Tensor,
         hotwords_id: list[list[int]] = [],
         hotwords_weight: Union[float, list[float]] = [],
-        hotwords_fst: _FST = None,
+        hotwords_fst: _Fst = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Expecting the logits to be softmaxed and not in log scale.
@@ -176,7 +176,7 @@ class CTCDecoder(_Decoder):
         seq_lens: torch.Tensor,
         hotwords_id: list[list[int]] = [],
         hotwords_weight: Union[float, list[float]] = [],
-        hotwords_fst: _FST = None,
+        hotwords_fst: _Fst = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Expecting the logits to be softmaxed and not in log scale.
