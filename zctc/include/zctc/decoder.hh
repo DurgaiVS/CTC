@@ -2,10 +2,8 @@
 #define _ZCTC_DECODER_H
 
 #include "ThreadPool.h"
-#include "pybind11/numpy.h"
 #include "pybind11/pybind11.h"
 #include "pybind11/stl.h"
-#include "utf8.h"
 
 #include "./ext_scorer.hh"
 #include "./node.hh"
@@ -42,21 +40,53 @@ public:
 	{
 	}
 
+	fst::StdVectorFst* generate_hw_fst(const std::vector<std::vector<int>>& hotwords_id,
+									   const std::vector<float>& hotwords_weight,
+									   fst::StdVectorFst* hotwords_fst) const;
+
 	template <typename T>
-	void batch_decode(py::array_t<T>& batch_log_logits, py::array_t<int>& batch_sorted_ids,
-					  py::array_t<int>& batch_labels, py::array_t<int>& batch_timesteps,
-					  py::array_t<int>& batch_seq_len, py::array_t<int>& batch_seq_pos, const int batch_size,
-					  const int max_seq_len, std::vector<std::vector<int>>& hotwords,
-					  std::vector<float>& hotwords_weight) const;
+	void batch_decode(T* logits, int* ids, int* labels, int* timesteps, int* seq_len, int* seq_pos,
+					  const int batch_size, const int max_seq_len, std::vector<std::vector<int>>& hotwords_id,
+					  std::vector<float>& hotwords_weight, fst::StdVectorFst* hotwords_fst) const;
+
+	void batch_decode_wrapper(long logits, int logit_bytes, long ids, long labels, long timesteps, long seq_len,
+							  long seq_pos, const int batch_size, const int max_seq_len,
+							  std::vector<std::vector<int>>& hotwords_id, std::vector<float>& hotwords_weight,
+							  fst::StdVectorFst* hotwords_fst) const
+	{
+		if (logit_bytes == sizeof(float)) {
+			this->batch_decode((float*)logits, (int*)ids, (int*)labels, (int*)timesteps, (int*)seq_len, (int*)seq_pos,
+							   batch_size, max_seq_len, hotwords_id, hotwords_weight, hotwords_fst);
+		} else if (logit_bytes == sizeof(double)) {
+			this->batch_decode((double*)logits, (int*)ids, (int*)labels, (int*)timesteps, (int*)seq_len, (int*)seq_pos,
+							   batch_size, max_seq_len, hotwords_id, hotwords_weight, hotwords_fst);
+		} else {
+			throw std::runtime_error("Invalid logit dtype. Expected floating point value of precision 32 or 64 bits.");
+		}
+	}
 
 #ifndef NDEBUG
 	// NOTE: This function is only for debugging purpose.
 	template <typename T>
-	void serial_decode(py::array_t<T>& batch_log_logits, py::array_t<int>& batch_sorted_ids,
-					   py::array_t<int>& batch_labels, py::array_t<int>& batch_timesteps,
-					   py::array_t<int>& batch_seq_len, py::array_t<int>& batch_seq_pos, const int batch_size,
-					   const int max_seq_len, std::vector<std::vector<int>>& hotwords,
-					   std::vector<float>& hotwords_weight) const;
+	void serial_decode(T* logits, int* ids, int* labels, int* timesteps, int* seq_len, int* seq_pos,
+					   const int batch_size, const int max_seq_len, std::vector<std::vector<int>>& hotwords_id,
+					   std::vector<float>& hotwords_weight, fst::StdVectorFst* hotwords_fst) const;
+
+	void serial_decode_wrapper(long logits, int logit_bytes, long ids, long labels, long timesteps, long seq_len,
+							   long seq_pos, const int batch_size, const int max_seq_len,
+							   std::vector<std::vector<int>>& hotwords_id, std::vector<float>& hotwords_weight,
+							   fst::StdVectorFst* hotwords_fst) const
+	{
+		if (logit_bytes == sizeof(float)) {
+			this->serial_decode((float*)logits, (int*)ids, (int*)labels, (int*)timesteps, (int*)seq_len, (int*)seq_pos,
+								batch_size, max_seq_len, hotwords_id, hotwords_weight, hotwords_fst);
+		} else if (logit_bytes == sizeof(double)) {
+			this->serial_decode((double*)logits, (int*)ids, (int*)labels, (int*)timesteps, (int*)seq_len, (int*)seq_pos,
+								batch_size, max_seq_len, hotwords_id, hotwords_weight, hotwords_fst);
+		} else {
+			throw std::runtime_error("Invalid logit dtype. Expected floating point value of precision 32 or 64 bits.");
+		}
+	}
 #endif // NDEBUG
 };
 
@@ -186,7 +216,7 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 
 		for (int i = 0, index = 0; i < decoder->cutoff_top_n; i++, curr_id++) {
 			index = *curr_id;
-			// NOTE: Implict type_casting from `T` to `double`.
+			// NOTE: Implicit type_casting from `T` to `double`.
 			prob = logits[iter_val + index];
 
 			if (prob < decoder->min_tok_prob)
@@ -389,39 +419,29 @@ zctc::Decoder::descending_compare(zctc::Node* x, zctc::Node* y)
  */
 template <typename T>
 void
-zctc::Decoder::batch_decode(py::array_t<T>& batch_log_logits, py::array_t<int>& batch_sorted_ids,
-							py::array_t<int>& batch_labels, py::array_t<int>& batch_timesteps,
-							py::array_t<int>& batch_seq_len, py::array_t<int>& batch_seq_pos, const int batch_size,
-							const int max_seq_len, std::vector<std::vector<int>>& hotwords,
-							std::vector<float>& hotwords_weight) const
+zctc::Decoder::batch_decode(T* logits, int* ids, int* labels, int* timesteps, int* seq_len, int* seq_pos,
+							const int batch_size, const int max_seq_len, std::vector<std::vector<int>>& hotwords_id,
+							std::vector<float>& hotwords_weight, fst::StdVectorFst* hotwords_fst) const
 {
 	ThreadPool pool(std::min(this->thread_count, batch_size));
 	std::vector<std::future<int>> results;
+	bool free_hw_fst = false;
 
-	fst::StdVectorFst hotwords_fst;
-	if (!hotwords.empty()) {
-		populate_hotword_fst(&hotwords_fst, hotwords, hotwords_weight);
+	if (!hotwords_id.empty()) {
+		if (hotwords_fst == nullptr) {
+			hotwords_fst = new fst::StdVectorFst();
+			free_hw_fst = true;
+		} else {
+			/*
+			NOTE: The reason for cloning `hotwords_fst` is to avoid
+				  unncessary overwriting of the parameterly passed
+				  `hotwords_fst`.
+			*/
+			hotwords_fst = new fst::StdVectorFst(*hotwords_fst);
+			free_hw_fst = true;
+		}
+		populate_hotword_fst(hotwords_fst, hotwords_id, hotwords_weight);
 	}
-
-	py::buffer_info logits_buf = batch_log_logits.request();
-	py::buffer_info ids_buf = batch_sorted_ids.request();
-	py::buffer_info labels_buf = batch_labels.request(true);
-	py::buffer_info timesteps_buf = batch_timesteps.request(true);
-	py::buffer_info seq_len_buf = batch_seq_len.request();
-	py::buffer_info seq_pos_buf = batch_seq_pos.request(true);
-
-	if (logits_buf.ndim != 3 || ids_buf.ndim != 3 || labels_buf.ndim != 3 || timesteps_buf.ndim != 3
-		|| seq_len_buf.ndim != 1 || seq_pos_buf.ndim != 2)
-		throw std::runtime_error("Logits must be three dimensional, like Batch x SeqLen x Vocab, "
-								 "and Sequence Length must be one dimensional, like Batch"
-								 "and Sequence Pos mus be two dimensional, like Batch x BeamWidth");
-
-	T* logits = static_cast<T*>(logits_buf.ptr);
-	int* ids = static_cast<int*>(ids_buf.ptr);
-	int* labels = static_cast<int*>(labels_buf.ptr);
-	int* timesteps = static_cast<int*>(timesteps_buf.ptr);
-	int* seq_len = static_cast<int*>(seq_len_buf.ptr);
-	int* seq_pos = static_cast<int*>(seq_pos_buf.ptr);
 
 	for (int i = 0, ip_pos = 0, op_pos = 0, s_p = 0; i < batch_size; i++) {
 		ip_pos = i * max_seq_len * this->vocab_size;
@@ -430,12 +450,35 @@ zctc::Decoder::batch_decode(py::array_t<T>& batch_log_logits, py::array_t<int>& 
 
 		results.emplace_back(pool.enqueue(zctc::decode<T>, this, logits + ip_pos, ids + ip_pos, labels + op_pos,
 										  timesteps + op_pos, *(seq_len + i), max_seq_len, seq_pos + s_p,
-										  (hotwords.empty() ? nullptr : &hotwords_fst)));
+										  hotwords_fst));
 	}
 
 	for (auto&& result : results)
 		if (result.get() != 0)
 			throw std::runtime_error("Unexpected error occured during execution");
+
+	if (free_hw_fst)
+		delete hotwords_fst;
+}
+
+/**
+ * @brief Populates the hotword FST with the provided hotwords and their weights.
+ *
+ * @param hotwords_id Vector of hotword tokens to consider for hotword boosting.
+ * @param hotwords_weight Vector of hotword weights to consider for hotword boosting.
+ *
+ * @return fst::StdVectorFst The populated hotword FST.
+ */
+fst::StdVectorFst*
+zctc::Decoder::generate_hw_fst(const std::vector<std::vector<int>>& hotwords_id,
+							   const std::vector<float>& hotwords_weight, fst::StdVectorFst* hotwords_fst) const
+{
+	if (hotwords_fst == nullptr)
+		hotwords_fst = new fst::StdVectorFst();
+
+	zctc::populate_hotword_fst(hotwords_fst, hotwords_id, hotwords_weight);
+
+	return hotwords_fst;
 }
 
 #ifndef NDEBUG
@@ -469,36 +512,27 @@ zctc::Decoder::batch_decode(py::array_t<T>& batch_log_logits, py::array_t<int>& 
  */
 template <typename T>
 void
-zctc::Decoder::serial_decode(py::array_t<T>& batch_log_logits, py::array_t<int>& batch_sorted_ids,
-							 py::array_t<int>& batch_labels, py::array_t<int>& batch_timesteps,
-							 py::array_t<int>& batch_seq_len, py::array_t<int>& batch_seq_pos, const int batch_size,
-							 const int max_seq_len, std::vector<std::vector<int>>& hotwords,
-							 std::vector<float>& hotwords_weight) const
+zctc::Decoder::serial_decode(T* logits, int* ids, int* labels, int* timesteps, int* seq_len, int* seq_pos,
+							 const int batch_size, const int max_seq_len, std::vector<std::vector<int>>& hotwords_id,
+							 std::vector<float>& hotwords_weight, fst::StdVectorFst* hotwords_fst) const
 {
-	fst::StdVectorFst hotwords_fst;
-	if (!hotwords.empty()) {
-		populate_hotword_fst(&hotwords_fst, hotwords, hotwords_weight);
+	bool free_hw_fst = false;
+
+	if (!hotwords_id.empty()) {
+		if (hotwords_fst == nullptr) {
+			hotwords_fst = new fst::StdVectorFst();
+			free_hw_fst = true;
+		} else {
+			/*
+			NOTE: The reason for cloning `hotwords_fst` is to avoid
+				  unncessary overwriting of the parameterly passed
+				  `hotwords_fst`.
+			*/
+			hotwords_fst = new fst::StdVectorFst(*hotwords_fst);
+			free_hw_fst = true;
+		}
+		populate_hotword_fst(hotwords_fst, hotwords_id, hotwords_weight);
 	}
-
-	py::buffer_info logits_buf = batch_log_logits.request();
-	py::buffer_info ids_buf = batch_sorted_ids.request();
-	py::buffer_info labels_buf = batch_labels.request(true);
-	py::buffer_info timesteps_buf = batch_timesteps.request(true);
-	py::buffer_info seq_len_buf = batch_seq_len.request();
-	py::buffer_info seq_pos_buf = batch_seq_pos.request(true);
-
-	if (logits_buf.ndim != 3 || ids_buf.ndim != 3 || labels_buf.ndim != 3 || timesteps_buf.ndim != 3
-		|| seq_len_buf.ndim != 1 || seq_pos_buf.ndim != 2)
-		throw std::runtime_error("Logits must be three dimensional, like Batch x SeqLen x Vocab, "
-								 "and Sequence Length must be one dimensional, like Batch"
-								 "and Sequence Pos mus be two dimensional, like Batch x BeamWidth");
-
-	T* logits = static_cast<T*>(logits_buf.ptr);
-	int* ids = static_cast<int*>(ids_buf.ptr);
-	int* labels = static_cast<int*>(labels_buf.ptr);
-	int* timesteps = static_cast<int*>(timesteps_buf.ptr);
-	int* seq_len = static_cast<int*>(seq_len_buf.ptr);
-	int* seq_pos = static_cast<int*>(seq_pos_buf.ptr);
 
 	for (int i = 0, ip_pos = 0, op_pos = 0, s_p = 0; i < batch_size; i++) {
 		ip_pos = i * max_seq_len * this->vocab_size;
@@ -506,8 +540,11 @@ zctc::Decoder::serial_decode(py::array_t<T>& batch_log_logits, py::array_t<int>&
 		s_p = i * this->beam_width;
 
 		zctc::decode<T>(this, logits + ip_pos, ids + ip_pos, labels + op_pos, timesteps + op_pos, *(seq_len + i),
-						max_seq_len, seq_pos + s_p, (hotwords.empty() ? nullptr : &hotwords_fst));
+						max_seq_len, seq_pos + s_p, hotwords_fst);
 	}
+
+	if (free_hw_fst)
+		delete hotwords_fst;
 }
 
 #endif // NDEBUG

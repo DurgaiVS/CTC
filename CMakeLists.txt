@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.5)
 
 project(ZCTC CXX)
-# project(ZCTC VERSION 0.1 LANGUAGES CXX)
+#project(ZCTC VERSION 0.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(BUILD_SHARED_LIBS ON)
@@ -40,13 +40,8 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/progschj/ThreadPool.git
     GIT_TAG 9a42ec13
 )
-FetchContent_Declare(
-    utf8_external
-    GIT_REPOSITORY https://github.com/nemtrif/utfcpp.git
-    GIT_TAG v4.0.6
-)
 
-FetchContent_MakeAvailable(pybind11 kenlm_external threadpool_external utf8_external)
+FetchContent_MakeAvailable(pybind11 kenlm_external threadpool_external)
 
 file(GLOB FST_SOURCES ${FST_DIR}/src/lib/*.cc ${FST_DIR}/src/script/*.cc)
 
@@ -58,7 +53,6 @@ include_directories(
     ${FST_DIR}/src/include
     ${FETCHCONTENT_BASE_DIR}/kenlm_external-src
     ${FETCHCONTENT_BASE_DIR}/threadpool_external-src
-    ${FETCHCONTENT_BASE_DIR}/utf8_external-src/source
 )
 
 target_link_libraries(

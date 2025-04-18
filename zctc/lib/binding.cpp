@@ -12,6 +12,12 @@ PYBIND11_MODULE(_zctc, m)
 		.def_readonly("beta", &zctc::ExternalScorer::beta)
 		.def_readonly("lex_penalty", &zctc::ExternalScorer::lex_penalty);
 
+	py::class_<fst::StdVectorFst>(m, "_Fst")
+		.def(pybind11::init<>())
+		.def("NumStates", &fst::StdVectorFst::NumStates, "Gets the number of states in the FST")
+		.def("Start", &fst::StdVectorFst::Start, "Gets the start state of the FST")
+		.def("Final", &fst::StdVectorFst::Final, "Gets the final state of the FST");
+
 	py::class_<zctc::Decoder>(m, "_Decoder")
 		.def(py::init<int, int, int, int, double, double, double, py::ssize_t, double, double, double, char,
 					  std::vector<std::string>, char*, char*>(),
@@ -19,28 +25,21 @@ PYBIND11_MODULE(_zctc, m)
 			 py::arg("nucleus_prob_per_timestep"), py::arg("alpha"), py::arg("beta"), py::arg("beam_width"),
 			 py::arg("lex_penalty"), py::arg("min_tok_prob"), py::arg("max_beam_score_deviation"), py::arg("tok_sep"),
 			 py::arg("vocab"), py::arg("lm_path") = nullptr, py::arg("lexicon_path") = nullptr)
-		.def("batch_decode", &zctc::Decoder::batch_decode<float>, py::arg("batch_log_logits"),
-			 py::arg("batch_sorted_ids"), py::arg("batch_labels"), py::arg("batch_timesteps"), py::arg("batch_seq_len"),
-			 py::arg("batch_seq_pos"), py::arg("batch_size"), py::arg("max_seq_len"),
-			 py::arg("hotwords") = std::vector<std::vector<int>>(), py::arg("hotwords_weight") = std::vector<float>(),
+		.def("generate_hw_fst", &zctc::Decoder::generate_hw_fst, py::arg("hotwords_id"), py::arg("hotwords_weight"),
+			 py::arg("hotwords_fst") = nullptr, pybind11::return_value_policy::take_ownership,
 			 py::call_guard<py::gil_scoped_release>())
-		.def("batch_decode", &zctc::Decoder::batch_decode<double>, py::arg("batch_log_logits"),
-			 py::arg("batch_sorted_ids"), py::arg("batch_labels"), py::arg("batch_timesteps"), py::arg("batch_seq_len"),
-			 py::arg("batch_seq_pos"), py::arg("batch_size"), py::arg("max_seq_len"),
-			 py::arg("hotwords") = std::vector<std::vector<int>>(), py::arg("hotwords_weight") = std::vector<float>(),
+		.def("batch_decode", &zctc::Decoder::batch_decode_wrapper, py::arg("logits"), py::arg("logit_bytes"),
+			 py::arg("ids"), py::arg("labels"), py::arg("timesteps"), py::arg("seq_len"), py::arg("seq_pos"),
+			 py::arg("batch_size"), py::arg("max_seq_len"), py::arg("hotwords") = std::vector<std::vector<int>>(),
+			 py::arg("hotwords_weight") = std::vector<float>(), py::arg("hotwords_fst") = nullptr,
 			 py::call_guard<py::gil_scoped_release>())
 
 #ifndef NDEBUG
 		// NOTE: This function is only for debugging purpose.
-		.def("serial_decode", &zctc::Decoder::serial_decode<float>, py::arg("batch_log_logits"),
-			 py::arg("batch_sorted_ids"), py::arg("batch_labels"), py::arg("batch_timesteps"), py::arg("batch_seq_len"),
-			 py::arg("batch_seq_pos"), py::arg("batch_size"), py::arg("max_seq_len"),
-			 py::arg("hotwords") = std::vector<std::vector<int>>(), py::arg("hotwords_weight") = std::vector<float>(),
-			 py::call_guard<py::gil_scoped_release>())
-		.def("serial_decode", &zctc::Decoder::serial_decode<double>, py::arg("batch_log_logits"),
-			 py::arg("batch_sorted_ids"), py::arg("batch_labels"), py::arg("batch_timesteps"), py::arg("batch_seq_len"),
-			 py::arg("batch_seq_pos"), py::arg("batch_size"), py::arg("max_seq_len"),
-			 py::arg("hotwords") = std::vector<std::vector<int>>(), py::arg("hotwords_weight") = std::vector<float>(),
+		.def("serial_decode", &zctc::Decoder::serial_decode_wrapper, py::arg("logits"), py::arg("logit_bytes"),
+			 py::arg("ids"), py::arg("labels"), py::arg("timesteps"), py::arg("seq_len"), py::arg("seq_pos"),
+			 py::arg("batch_size"), py::arg("max_seq_len"), py::arg("hotwords") = std::vector<std::vector<int>>(),
+			 py::arg("hotwords_weight") = std::vector<float>(), py::arg("hotwords_fst") = nullptr,
 			 py::call_guard<py::gil_scoped_release>())
 #endif // NDEBUG
 

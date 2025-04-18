@@ -73,7 +73,6 @@ normalise(T* logits, int size)
 	}
 }
 
-
 /**
  * @brief Test the decoder with random logits.
  *
@@ -85,6 +84,7 @@ debug_decoder()
 
 	char tok_sep = '#';
 	int iter_count, blank_id, seq_len = 1000, thread_count = 1, cutoff_top_n = 40;
+	int batch_size = 4;
 	float nucleus_prob_per_timestep = 1.0, penalty = -5.0, alpha = 0.017, beta = 0;
 	float min_tok_prob = -10.0, max_beam_deviation = -20.0;
 	std::size_t beam_width = 25;
@@ -112,16 +112,15 @@ debug_decoder()
 						  beam_width, penalty, min_tok_prob, max_beam_deviation, tok_sep, vocab, lm_path.data(),
 						  lexicon_path.data());
 
-	std::vector<float> logits(decoder.vocab_size * seq_len);
-	std::vector<int> sorted_indices(decoder.vocab_size * seq_len);
-	std::vector<int> labels(decoder.beam_width * seq_len, 0);
-	std::vector<int> timesteps(decoder.beam_width * seq_len, 0);
-	std::vector<int> seq_pos(decoder.beam_width, 0);
+	std::vector<float> logits(batch_size * decoder.vocab_size * seq_len);
+	std::vector<int> sorted_indices(batch_size * decoder.vocab_size * seq_len);
+	std::vector<int> labels(batch_size * decoder.beam_width * seq_len, 0);
+	std::vector<int> timesteps(batch_size * decoder.beam_width * seq_len, 0);
+	std::vector<int> seq_lens(batch_size, seq_len);
+	std::vector<int> seq_pos(batch_size * decoder.beam_width, 0);
 
-	fst::StdVectorFst hotwords_fst;
-	std::vector<std::vector<int>> hotwords({ { 1, 2, 3, 4, 5 } });
-	std::vector<float> hotwords_weight(5.0);
-	zctc::populate_hotword_fst(&hotwords_fst, hotwords, hotwords_weight);
+	std::vector<std::vector<int>> hotwords({ { 1, 2, 3, 4, 5 }, { 1, 5, 7, 9, 11 }, { 3, 6, 9 } });
+	std::vector<float> hotwords_weight({ 5.0, 10.0, 20.0 });
 
 	// To generate random values for logits
 	std::chrono::milliseconds duration(0);
@@ -131,24 +130,26 @@ debug_decoder()
 	std::normal_distribution<float> dist { 0.1f, 3.0f };
 	auto gen = [&dist, &mersenne_engine]() { return dist(mersenne_engine); };
 
-	for (int t = 1, temp = 0; t <= iter_count; t++) {
+	for (int t = 1; t <= iter_count; t++) {
 
 		std::cout << "\rIteration: " << t << " / " << iter_count << " [" << duration.count() << " ms / it]"
 				  << std::flush;
 		std::generate(logits.begin(), logits.end(), gen);
 
 		// To get the sorted indices for the logits, timesteps wise
-		for (int i = 0; i < seq_len; i++) {
-			temp = i * decoder.vocab_size;
-			normalise(logits.data() + temp, decoder.vocab_size);
-			std::iota(sorted_indices.begin() + temp, sorted_indices.begin() + (temp + decoder.vocab_size), 0);
-			std::stable_sort(sorted_indices.begin() + temp, sorted_indices.begin() + (temp + decoder.vocab_size),
-							 [&logits, &temp](int a, int b) { return logits[temp + a] > logits[temp + b]; });
+		for (int i = 0; i < batch_size; i++) {
+			for (int j = 0, temp = 0; j < seq_len; j++) {
+				temp = (i * seq_len * decoder.vocab_size) + (j * decoder.vocab_size);
+				normalise(logits.data() + temp, decoder.vocab_size);
+				std::iota(sorted_indices.begin() + temp, sorted_indices.begin() + (temp + decoder.vocab_size), 0);
+				std::stable_sort(sorted_indices.begin() + temp, sorted_indices.begin() + (temp + decoder.vocab_size),
+								 [&logits, &temp](int a, int b) { return logits[temp + a] > logits[temp + b]; });
+			}
 		}
 
 		auto start = std::chrono::high_resolution_clock::now();
-		zctc::decode<float>(&decoder, logits.data(), sorted_indices.data(), labels.data(), timesteps.data(), seq_len,
-							seq_len, seq_pos.data(), &hotwords_fst);
+		decoder.serial_decode(logits.data(), sorted_indices.data(), labels.data(), timesteps.data(), seq_lens.data(),
+							  seq_pos.data(), batch_size, seq_len, hotwords, hotwords_weight, nullptr);
 		auto end = std::chrono::high_resolution_clock::now();
 		duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 

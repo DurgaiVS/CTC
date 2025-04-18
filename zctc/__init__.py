@@ -4,7 +4,7 @@ import logging
 from typing import Optional, Tuple, Union
 
 import torch
-from _zctc import _ZFST, _Decoder
+from _zctc import _ZFST, _Decoder, _FST
 
 
 def _get_apostrophe_id_from_vocab(vocab: list[str]) -> int:
@@ -81,8 +81,9 @@ class CTCDecoder(_Decoder):
         self,
         logits: torch.Tensor,
         seq_lens: torch.Tensor,
-        hotwords: list[list[int]] = [],
+        hotwords_id: list[list[int]] = [],
         hotwords_weight: Union[float, list[float]] = [],
+        hotwords_fst: _FST = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Expecting the logits to be softmaxed and not in log scale.
@@ -91,9 +92,10 @@ class CTCDecoder(_Decoder):
             logits: Input logits from model (batch_size, seq_len, vocab_size),
                     can be of type `torch.float32` or `torch.float64`.
             seq_lens: Length of each unpadded sequence in the batch.
-            hotwords: List of hotword tokens.
+            hotwords_id: List of hotword tokens.
             hotwords_weight: List of weights for each hotword token or a single weight
                              for all hotword tokens.
+            hotwords_fst: Hotword FST object build using `self.generate_hw_fst` method.
 
         Returns:
             A tuple containing the following:
@@ -101,50 +103,69 @@ class CTCDecoder(_Decoder):
                 - timesteps: Timesteps of the decoded labels (batch_size, beam_width, seq_len).
                 - seq_pos: Start index of both labels and timesteps (batch_size, beam_width).
         """
-        batch_size, seq_len, _ = logits.shape
+
+        if logits.ndim != 3:
+            raise ValueError(
+                f"Invalid logits shape {logits.shape}, expecting (batch_size, seq_len, vocab_size)"
+            )
+        elif seq_lens.ndim != 1:
+            raise ValueError(
+                f"Invalid seq_lens shape {seq_lens.shape}, expecting (batch_size)"
+            )
+
+        if logits.device.type != "cpu":
+            logits = (
+                logits.detach().cpu().contiguous(memory_format=torch.preserve_format)
+            )
+        elif not logits.is_contiguous():
+            logits = logits.contiguous(memory_format=torch.preserve_format)
+        else:
+            logits = logits.detach()
+
+        if seq_lens.device.type != "cpu":
+            seq_lens = seq_lens.detach().to("cpu", torch.int32)
+        else:
+            seq_lens = seq_lens.detach().to("cpu", torch.int32)
+
+        batch_size, seq_len, vocab_size = logits.shape
+        assert (
+            vocab_size == self.vocab_size
+        ), f"Vocab size mismatch {vocab_size} != {self.vocab_size}"
+
         if isinstance(hotwords_weight, float):
-            hotwords_weight = [hotwords_weight] * len(hotwords)
+            hotwords_weight = [hotwords_weight] * len(hotwords_id)
 
 #TODO : sort hotwords in descending based on weight, and for same weight
 #sort in ascending based on token length...
 
         sorted_indices = (
             torch.argsort(logits, dim=2, descending=True)
-            .detach()
             .to("cpu", torch.int32)
-            .contiguous()
-            .numpy()
+            .contiguous(memory_format=torch.preserve_format)
         )
-        labels = torch.empty((batch_size, self.beam_width, seq_len), dtype=torch.int32)
+        labels = torch.empty(
+            (batch_size, self.beam_width, seq_len), dtype=torch.int32
+        ).contiguous(memory_format=torch.preserve_format)
         timesteps = torch.empty(
             (batch_size, self.beam_width, seq_len), dtype=torch.int32
-        )
-        seq_pos = torch.empty((batch_size, self.beam_width), dtype=torch.int32)
-
-
-        if not logits.is_contiguous():
-            logits = logits.contiguous()
-        if not seq_lens.is_contiguous():
-            seq_lens = seq_lens.contiguous()
-        if not labels.is_contiguous():
-            labels = labels.contiguous()
-        if not timesteps.is_contiguous():
-            timesteps = timesteps.contiguous()
-        if not seq_pos.is_contiguous():
-            seq_pos = seq_pos.contiguous()
-
+        ).contiguous(memory_format=torch.preserve_format)
+        seq_pos = torch.empty(
+            (batch_size, self.beam_width), dtype=torch.int32
+        ).contiguous(memory_format=torch.preserve_format)
 
         self.batch_decode(
-            logits.detach().cpu().numpy(),
-            sorted_indices,
-            labels.numpy(),
-            timesteps.numpy(),
-            seq_lens.detach().to("cpu", torch.int32).numpy(),
-            seq_pos.numpy(),
+            logits.data_ptr(),
+            logits.element_size(),
+            sorted_indices.data_ptr(),
+            labels.data_ptr(),
+            timesteps.data_ptr(),
+            seq_lens.data_ptr(),
+            seq_pos.data_ptr(),
             batch_size,
             seq_len,
-            hotwords,
+            hotwords_id,
             hotwords_weight,
+            hotwords_fst,
         )
 
         return labels, timesteps, seq_pos
@@ -153,8 +174,9 @@ class CTCDecoder(_Decoder):
         self,
         logits: torch.Tensor,
         seq_lens: torch.Tensor,
-        hotwords: list[list[int]] = [],
+        hotwords_id: list[list[int]] = [],
         hotwords_weight: Union[float, list[float]] = [],
+        hotwords_fst: _FST = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Expecting the logits to be softmaxed and not in log scale.
@@ -166,9 +188,10 @@ class CTCDecoder(_Decoder):
             logits: Input logits from model (batch_size, seq_len, vocab_size),
                     can be of type `torch.float32` or `torch.float64`.
             seq_lens: Length of each unpadded sequence in the batch.
-            hotwords: List of hotword tokens.
+            hotwords_id: List of hotword tokens.
             hotwords_weight: List of weights for each hotword token or a single weight
                              for all hotword tokens.
+            hotwords_fst: Hotword FST object build using `self.generate_hw_fst` method.
 
         Returns:
             A tuple containing the following:
@@ -185,36 +208,68 @@ class CTCDecoder(_Decoder):
                 "This method can only be used with the `DEBUG` mode build of the `zctc`."
             )
 
-        batch_size, seq_len, _ = logits.shape
+        if logits.ndim != 3:
+            raise ValueError(
+                f"Invalid logits shape {logits.shape}, expecting (batch_size, seq_len, vocab_size)"
+            )
+        elif seq_lens.ndim != 1:
+            raise ValueError(
+                f"Invalid seq_lens shape {seq_lens.shape}, expecting (batch_size)"
+            )
+
+        if logits.device.type != "cpu":
+            logits = (
+                logits.detach().cpu().contiguous(memory_format=torch.preserve_format)
+            )
+        elif not logits.is_contiguous():
+            logits = logits.contiguous(memory_format=torch.preserve_format)
+        else:
+            logits = logits.detach()
+
+        if seq_lens.device.type != "cpu":
+            seq_lens = seq_lens.detach().to("cpu", torch.int32)
+        else:
+            seq_lens = seq_lens.detach().to("cpu", torch.int32)
+
+        batch_size, seq_len, vocab_size = logits.shape
+        assert (
+            vocab_size == self.vocab_size
+        ), f"Vocab size mismatch {vocab_size} != {self.vocab_size}"
+
         if isinstance(hotwords_weight, float):
-            hotwords_weight = [hotwords_weight] * len(hotwords)
+            hotwords_weight = [hotwords_weight] * len(hotwords_id)
 
 #TODO : sort hotwords in descending based on weight, and for same weight
 #sort in ascending based on token length...
 
         sorted_indices = (
             torch.argsort(logits, dim=2, descending=True)
-            .detach()
             .to("cpu", torch.int32)
-            .numpy()
+            .contiguous(memory_format=torch.preserve_format)
         )
-        labels = torch.zeros((batch_size, self.beam_width, seq_len), dtype=torch.int32)
-        timesteps = torch.zeros(
+        labels = torch.empty(
             (batch_size, self.beam_width, seq_len), dtype=torch.int32
-        )
-        seq_pos = torch.zeros((batch_size, self.beam_width), dtype=torch.int32)
+        ).contiguous(memory_format=torch.preserve_format)
+        timesteps = torch.empty(
+            (batch_size, self.beam_width, seq_len), dtype=torch.int32
+        ).contiguous(memory_format=torch.preserve_format)
+        seq_pos = torch.empty(
+            (batch_size, self.beam_width), dtype=torch.int32
+        ).contiguous(memory_format=torch.preserve_format)
 
         self.serial_decode(
-            logits.detach().cpu().numpy(),
-            sorted_indices,
-            labels.numpy(),
-            timesteps.numpy(),
-            seq_lens.detach().to("cpu", torch.int32).numpy(),
-            seq_pos.numpy(),
+            logits.data_ptr(),
+            logits.element_size(),
+            sorted_indices.data_ptr(),
+            labels.data_ptr(),
+            timesteps.data_ptr(),
+            seq_lens.data_ptr(),
+            seq_pos.data_ptr(),
             batch_size,
             seq_len,
-            hotwords,
+            hotwords_id,
             hotwords_weight,
+            hotwords_fst,
         )
 
         return labels, timesteps, seq_pos

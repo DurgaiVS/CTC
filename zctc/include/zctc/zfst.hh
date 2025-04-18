@@ -62,8 +62,8 @@ int
 parse_lexicon_file(ZFST* zfst, std::string file_path, int freq_threshold);
 // NOTE: hotwords_weight should be sorted in descending order...
 void
-populate_hotword_fst(fst::StdVectorFst* fst, std::vector<std::vector<int>>& hotwords,
-					 std::vector<float>& hotwords_weight);
+populate_hotword_fst(fst::StdVectorFst* fst, const std::vector<std::vector<int>>& hotwords,
+					 const std::vector<float>& hotwords_weight);
 
 } // namespace zctc
 
@@ -278,8 +278,8 @@ zctc::parse_lexicon_file(zctc::ZFST* zfst, std::string file_path, int freq_thres
  * @return void
  */
 void
-zctc::populate_hotword_fst(fst::StdVectorFst* fst, std::vector<std::vector<int>>& hotwords,
-						   std::vector<float>& hotwords_weight)
+zctc::populate_hotword_fst(fst::StdVectorFst* fst, const std::vector<std::vector<int>>& hotwords,
+						   const std::vector<float>& hotwords_weight)
 {
 	int token;
 	float hotword_weight, hotword_split;
@@ -289,7 +289,7 @@ zctc::populate_hotword_fst(fst::StdVectorFst* fst, std::vector<std::vector<int>>
 	zctc::init_fst(fst);
 
 	for (int i = 0; i < hotwords.size(); i++) {
-		std::vector<int>& tokens = hotwords[i];
+		const std::vector<int>& tokens = hotwords[i];
 		hotword_weight = hotwords_weight[i];
 		hotword_split = hotword_weight / tokens.size();
 		state = fst->Start();

@@ -192,6 +192,7 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node* node, fst::SortedMatcher<fst::
 				arc.olabel is the token length so far in the hotword,
 				arc.weight.Value() is the weight for each hotword token.
 			*/
+			node->hotword_state = arc.nextstate;
 			node->hw_score = (arc.olabel * arc.weight.Value());
 			node->is_hotpath = true;
 		}
