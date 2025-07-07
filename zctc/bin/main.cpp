@@ -1,3 +1,4 @@
+#include <cassert>
 #include <chrono>
 #include <ctime>
 #include <fstream>
@@ -153,10 +154,22 @@ debug_decoder()
 		auto end = std::chrono::high_resolution_clock::now();
 		duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 
+		for (int i = 0; i < batch_size; i++) {
+			for (int j = 0; j < beam_width; j++) {
+				int prev_val = -1, curr_val = -1;
+				for (int k = seq_pos[(i * beam_width) + j]; k < seq_len; k++) {
+					curr_val = timesteps[(i * beam_width * seq_len) + (j * seq_len) + k];
+					assert(("The timestep is not in increasing order...", prev_val < curr_val));
+					prev_val = curr_val;
+				}
+			}
+		}
+
 		std::fill(labels.begin(), labels.end(), 0);
 		std::fill(timesteps.begin(), timesteps.end(), 0);
 		std::fill(seq_pos.begin(), seq_pos.end(), 0);
 	}
+
 	std::cout << std::endl;
 
 	return 0;

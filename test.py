@@ -9,7 +9,7 @@ from ctcdecode import CTCBeamDecoder
 from pyctcdecode import build_ctcdecoder, BeamSearchDecoderCTC
 from tqdm import tqdm
 
-from zctc import CTCDecoder
+from zctc import CTCBeamDecoder
 
 ZCTC_val = 0
 PARLANCE_val = 0
@@ -54,7 +54,7 @@ def yield_batch(filepath: List[Path], batch_size: int):
         yield collate_fn(batch_logits), torch.IntTensor(batch_seqlen)
 
 
-def zctc_ctc(decoder: CTCDecoder, logits: torch.Tensor, seq_lens: torch.Tensor):
+def zctc_ctc(decoder: CTCBeamDecoder, logits: torch.Tensor, seq_lens: torch.Tensor):
     logits = logits.exp()
 
     start = time()
@@ -152,7 +152,7 @@ if __name__ == "__main__":
         tok_sep,
         lexicon_fst_path,
     )
-    zctc_decoder = CTCDecoder(
+    zctc_decoder = CTCBeamDecoder(
         batch_size,
         blank_id,
         cutoff_top_n,

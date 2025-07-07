@@ -235,22 +235,23 @@ log_diff_exp(T x, T y)
 double
 zctc::Node::update_score(int curr_ts, std::vector<zctc::Node*>& more_confident_repeats)
 {
-	/*
-		In case, if a node encounters a blank and a repeat token
-		at the same timestep, this could cause the node to have
-		two calls to this function, which could lead to the
-		node's score to be updated twice, which is not desirable.
-
-		To avoid a check when inserting the nodes into the writer,
-		we are going with this approach.
-	*/
-
+	/**
+	 * NOTE: In case, if a node encounters a blank and a repeat token
+	 * 		 at the same timestep, this could cause the node to have
+	 * 		 two calls to this function, which could lead to the
+	 * 		 node's score to be updated twice, which is not desirable.
+	 *
+	 * 		 To avoid a check when inserting the nodes into the writer,
+	 * 		 we are going with this approach.
+	 */
 	if (this->_max_prob > this->max_prob) {
 
 		if (this->childs.size() != 0) {
-			// This is a more confident repeat token,
-			// so, we'll create a new node and update the
-			// score with the most confident probability.
+			/**
+			 * NOTE: This is a more confident repeat token,
+			 * 		 so, we'll create a new node and update the
+			 * 		 score with the most confident probability.
+			 */
 			Node* node = new Node(*this);
 			more_confident_repeats.emplace_back(node);
 
@@ -271,11 +272,11 @@ zctc::Node::update_score(int curr_ts, std::vector<zctc::Node*>& more_confident_r
 		this->ts = curr_ts;
 	}
 
-	/*
-		Here,
-		`*_prob` will be in linear scale,
-		`*_score, ` will be in log scale,
-	*/
+	/**
+	 * NOTE: Here,
+	 * 		 `*_prob` will be in linear scale,
+	 * 		 `*_score, ` will be in log scale,
+	 */
 	double prev_score = this->score;
 	this->score = prev_score + std::log(this->tk_prob + this->b_prob);
 
@@ -320,30 +321,30 @@ zctc::Node::update_score(int curr_ts, std::vector<zctc::Node*>& more_confident_r
 void
 zctc::Node::acc_prob(double prob, std::vector<zctc::Node*>& writer)
 {
-	/*
-	NOTE: Instead of creating a duplicate when we encounter a more
-		  confident repeat token, we'll just cache the most confident
-		  probability in `_max_prob` and when creating new node
-		  due to confidence timestep update, we'll consider this probs,
-
-						--> blank
-						|
-			parent --->	a ---> some other tokens
-						|
-						--> a(but more confident)
-
-			the above case will be encountered as two different paths,
-
-			1. a -> some childs
-			2. a -> (blank | a)
-
-			if we accept the token probability, we have to update the
-			timestep too, so, we won't consider the token and blank
-			probs for the first path, so the child nodes won't have
-			a mess in the timestep order, and for the second path,
-			we'll consider both probs (if provided) as well as the
-			blank probs.
-	*/
+	/**
+	 * NOTE: Instead of creating a duplicate when we encounter a more
+	 * 		 confident repeat token, we'll just cache the most confident
+	 * 		 probability in `_max_prob` and when creating new node
+	 * 		 due to confidence timestep update, we'll consider this probs,
+	 *
+	 * 			--> blank
+	 * 			|
+	 * parent --->	a ---> some other tokens
+	 * 			|
+	 * 			--> a(but more confident)
+	 *
+	 * 		 the above case will be encountered as two different paths,
+	 *
+	 * 		 1. a -> some childs
+	 * 		 2. a -> (blank | a)
+	 *
+	 * 		 if we accept the token probability, we have to update the
+	 * 		 timestep too, so, we won't consider the token and blank
+	 * 		 probs for the first path, so the child nodes won't have
+	 * 		 a mess in the timestep order, and for the second path,
+	 * 		 we'll consider both probs (if provided) as well as the
+	 * 		 blank probs.
+	 */
 	if (!this->is_at_writer) {
 		writer.emplace_back(this);
 		this->is_at_writer = true;
@@ -373,11 +374,10 @@ zctc::Node::acc_tk_and_parent_prob(double prob, std::vector<zctc::Node*>& writer
 		writer.emplace_back(this);
 		this->is_at_writer = true;
 	}
-	/*
-	NOTE: Please look at `acc_prob` functions comment to understand how we are handling
-		  duplicate but more confident token.
-	*/
-
+	/**
+	 * NOTE: Please look at `acc_prob` functions comment to understand
+	 * 		 how we are handling duplicate but more confident token.
+	 */
 	if (prob > this->max_prob) {
 		this->_max_prob = prob;
 	}
@@ -471,40 +471,40 @@ zctc::Node*
 zctc::Node::acc_repeat_token_prob(int ts, double prob, std::vector<zctc::Node*>& writer,
 								  std::vector<zctc::Node*>& reader)
 {
-	/*
-	NOTE: In case, if the token is the most recent than the blank, or,
-		  if the blank and token are at the same timestep,
-		  within this node,
-		  we can accumulate the probs with the current node.
-
-		  The assumption here is,
-		  If the token is the most recent than the blank, then we will
-		  treat the token as monotonic, and we won't extend the path,
-		  rather we will accumulate the probs with the current node.
-	*/
+	/**
+	 * NOTE: In case, if the token is the most recent than the blank, or,
+	 * 		 if the blank and token are at the same timestep,
+	 * 		 within this node,
+	 * 		 we can accumulate the probs with the current node.
+	 *
+	 * 		 The assumption here is,
+	 * 		 If the token is the most recent than the blank, then we will
+	 * 		 treat the token as monotonic, and we won't extend the path,
+	 * 		 rather we will accumulate the probs with the current node.
+	 */
 	if (this->tk_ts >= this->b_ts)
 		this->acc_prob(prob, writer);
 
-	/*
-	NOTE: In case, if the blank is more recent than the token, or,
-		  if the blank and token are at the same timestep,
-		  within this node,
-		  we can create a new child, assuming that the current token
-		  (the one passed in the argument) is preceded by a blank.
-
-		  The assumption here is,
-		  If the blank is the most recent than the token, then we will
-		  treat the token as non-monotonic, and we will extend the path,
-		  rather than accumulating the probs with the current node, due to
-		  the fact that the token is preceded by a blank.
-	*/
+	/**
+	 * NOTE: In case, if the blank is more recent than the token, or,
+	 * 		 if the blank and token are at the same timestep,
+	 * 		 within this node,
+	 * 		 we can create a new child, assuming that the current token
+	 * 		 (the one passed in the argument) is preceded by a blank.
+	 *
+	 * 		 The assumption here is,
+	 * 		 If the blank is the most recent than the token, then we will
+	 * 		 treat the token as non-monotonic, and we will extend the path,
+	 * 		 rather than accumulating the probs with the current node, due to
+	 * 		 the fact that the token is preceded by a blank.
+	 */
 	if (this->b_ts >= this->tk_ts) {
-		/*
-		NOTE: In case, if the child is already available, we can just update
-			  the probs and return the child.
-			  Not sure if this case is possible or not, but just wanted to
-			  ensure that we are not creating duplicate child nodes.
-		*/
+		/**
+		 * NOTE: In case, if the child is already available, we can just update
+		 * 		 the probs and return the child.
+		 * 		 Not sure if this case is possible or not, but just wanted to
+		 * 		 ensure that we are not creating duplicate child nodes.
+		 */
 		for (zctc::Node* r_node : *this) {
 			if ((r_node->id != id) || r_node->is_deprecated)
 				continue;
@@ -514,10 +514,10 @@ zctc::Node::acc_repeat_token_prob(int ts, double prob, std::vector<zctc::Node*>&
 		}
 
 		if (this->is_clone) {
-			/*
-			NOTE: If this is a cloned node, then we'll look
-				for the `source` node's child list too.
-			*/
+			/**
+			 * NOTE: If this is a cloned node, then we'll look
+			 * 		 for the `source` node's child list too.
+			 */
 			for (Node* r_node : this->alt_childs) {
 				if ((r_node->id != id) || r_node->is_deprecated)
 					continue;
@@ -527,13 +527,13 @@ zctc::Node::acc_repeat_token_prob(int ts, double prob, std::vector<zctc::Node*>&
 			}
 		}
 
-		/*
-		NOTE: If the child is not available, then we can create a new child.
-			  Note, here we are using the `only_prev_prob` flag, to indicate
-			  that the extended node is preceeded by a blank, so if the current
-			  node has both `blank` and `token` encountered previously, then
-			  we'll only consider the previous `blank`.
-		*/
+		/**
+		 * NOTE: If the child is not available, then we can create a new child.
+		 * 		 NOTE, here we are using the `only_prev_prob` flag, to indicate
+		 * 		 that the extended node is preceeded by a blank, so if the current
+		 * 		 node has both `blank` and `token` encountered previously, then
+		 * 		 we'll only consider the previous `blank`.
+		 */
 		zctc::Node* child = new zctc::Node(id, ts, prob, token, this, true);
 
 		this->childs.emplace_back(child);
@@ -573,26 +573,26 @@ zctc::Node::extend_path(int id, int ts, double prob, const std::string token, st
 		if ((r_node->id != id) || r_node->is_deprecated)
 			continue;
 
-		/*
-			If the current node has a child with the provided id,
-			then we can accumulate the probs within the child node.
-
-			Since, we're accumulating the repeated and blank probs
-			within the node itself, there could be a possibility that
-			the parent's probs have changed from the timestep this
-			child was created, so we need to update the parent probs
-			value in the child node too...More details in the function
-			definition.
-		*/
+		/**
+		 * NOTE: If the current node has a child with the provided id,
+		 * 		 then we can accumulate the probs within the child node.
+		 *
+		 * 		 Since, we're accumulating the repeated and blank probs
+		 * 		 within the node itself, there could be a possibility that
+		 * 		 the parent's probs have changed from the timestep this
+		 * 		 child was created, so we need to update the parent probs
+		 * 		 value in the child node too...More details in the function
+		 * 		 definition.
+		 */
 		r_node->acc_tk_and_parent_prob(prob, writer);
 		return nullptr;
 	}
 
 	if (this->is_clone) {
-		/*
-		NOTE: If this is a cloned node, then we'll look
-			  for the `source` node's child list too.
-		*/
+		/**
+		 * NOTE: If this is a cloned node, then we'll look
+		 * 		 for the `source` node's child list too.
+		 */
 		for (Node* r_node : this->alt_childs) {
 			if ((r_node->id != id) || r_node->is_deprecated)
 				continue;
@@ -602,10 +602,10 @@ zctc::Node::extend_path(int id, int ts, double prob, const std::string token, st
 		}
 	}
 
-	/*
-	NOTE: If the current node has no child with the provided id,
-		  then we can create a new child node and extend the path.
-	*/
+	/**
+	 * NOTE: If the current node has no child with the provided id,
+	 * 		 then we can create a new child node and extend the path.
+	 */
 	zctc::Node* child = new zctc::Node(id, ts, prob, token, this);
 
 	this->childs.emplace_back(child);

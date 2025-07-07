@@ -49,6 +49,30 @@ public:
 					  const int batch_size, const int max_seq_len, std::vector<std::vector<int>>& hotwords_id,
 					  std::vector<float>& hotwords_weight, fst::StdVectorFst* hotwords_fst) const;
 
+	/**
+	 * @brief Decodes the provided logits using CTC Beam Search algorithm. This function is the main entry point
+	 * from the Python bindings. Since `torch` passes the logits datapointer as a `long` type instead of a pointer,
+	 * we need to use a wrapper function to convert the `long` type to the appropriate pointer type based on the
+	 * logit bytes.
+	 *
+	 * @param logits The logits array pointer, which can be either a float or double pointer, depending on the logit
+	 * bytes.
+	 * @param logit_bytes The size of the logit type in bytes (either 4 for float or 8 for double).
+	 * @param ids The sorted ids array pointer, which is an integer pointer.
+	 * @param labels The labels array pointer, which is an integer pointer.
+	 * @param timesteps The timesteps array pointer, which is an integer pointer.
+	 * @param seq_len The sequence lengths array pointer, which is an integer pointer.
+	 * @param seq_pos The sequence positions array pointer, which is an integer pointer.
+	 * @param batch_size The number of batches to decode.
+	 * @param max_seq_len The maximum sequence length for the batch.
+	 * @param hotwords_id The hotwords ids vector, which is a vector of hotword token ids.
+	 * @param hotwords_weight The hotwords weights vector, which is a vector of hotword token weights.
+	 * @param hotwords_fst The hotwords finite state transducer, which is a pointer to a `fst::StdVectorFst` object.
+	 *
+	 * @note This function is used to decode the logits in a batch-wise manner, allowing for efficient decoding
+	 * of multiple sequences at once. The logits should be in the shape of Batch x SeqLen x Vocab, containing the
+	 * softmaxed probabilities in linear scale.
+	 */
 	void batch_decode_wrapper(long logits, int logit_bytes, long ids, long labels, long timesteps, long seq_len,
 							  long seq_pos, const int batch_size, const int max_seq_len,
 							  std::vector<std::vector<int>>& hotwords_id, std::vector<float>& hotwords_weight,
@@ -174,21 +198,19 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 
 	decoder->ext_scorer.initialise_start_states(&root, hotwords_fst);
 
-	/*
-	NOTE: For performance reasons, we initialise and reserve memory
-		  for the prefixes. But due to some technical fault encountered,
-		  `cannot create std::vector larger than max_size()`,
-		  we're keeping the number as low as possible.
-	*/
+	/**
+	 * NOTE: For performance reasons, we initialise and reserve memory
+	 * 		 for the prefixes.
+	 */
 	prefixes0.reserve(2 * decoder->beam_width);
 	prefixes1.reserve(2 * decoder->beam_width);
 	prefixes0.emplace_back(&root);
 
 	for (int timestep = 0; timestep < seq_len; timestep++) {
-		/*
-		Note: Swap the reader and writer vectors, as per the timestep,
-			  to avoid cleaning and copying the elements.
-		*/
+		/**
+		 * NOTE: Swap the reader and writer vectors, as per the timestep,
+		 * 		 to avoid cleaning and copying the elements.
+		 */
 		std::vector<zctc::Node*>& reader = ((timestep % 2) == 0 ? prefixes0 : prefixes1);
 		std::vector<zctc::Node*>& writer = ((timestep % 2) == 0 ? prefixes1 : prefixes0);
 
@@ -199,10 +221,10 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 		move_clones_to_start(reader);
 
 		if (full_beam) {
-			/*
-			NOTE: Parlance style of pruning the node extensions
-				  based on their score.
-			*/
+			/**
+			 * NOTE: Parlance style of pruning the node extensions
+			 * 		 based on their score.
+			 */
 			min_beam_score = std::numeric_limits<double>::max();
 			for (zctc::Node* r_node : reader) {
 				if (r_node->ovrl_score < min_beam_score)
@@ -226,10 +248,10 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 			nucleus_count += prob;
 
 			if (is_blank) {
-				/*
-				Note: Just update the blank probs of the node and
-					  continue in case if the current is blank token.
-				*/
+				/**
+				 * NOTE: Just update the blank probs of the node and
+				 * 		 continue in case if the current is blank token.
+				 */
 				for (zctc::Node* r_node : reader) {
 					r_node->b_prob = prob;
 					if (!r_node->is_at_writer) {
@@ -242,33 +264,33 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 			}
 
 			for (zctc::Node* r_node : reader) {
-				/*
-				NOTE: Parlance style will be just accumulating
-					  the token probs, but we've included the blank
-					  probs too, coz, there they'll be updating the
-					  score of the node immediately after node extension,
-					  but we update score only at the end of each timestep
-					  parsing.
-				*/
+				/**
+				 * NOTE: Parlance style will be just accumulating
+				 * 		 the token probs, but we've included the blank
+				 * 		 probs too, coz, there they'll be updating the
+				 * 		 score of the node immediately after node extension,
+				 * 		 but we update score only at the end of each timestep
+				 * 		 parsing.
+				 */
 				if (full_beam && ((r_node->ovrl_score + std::log(prob)) < min_beam_score))
 					break;
 
 				child = r_node->extend_path(index, timestep, prob, decoder->vocab[index], writer, reader);
 
-				/*
-				NOTE: `nullptr` means the path extension was not done,
-					  (ie) no new node was created, the probs were
-					  accumulated within the current node, or the node
-					  was cloned.
-				*/
+				/**
+				 * NOTE: `nullptr` means the path extension was not done,
+				 * 		 (ie) no new node was created, the probs were
+				 * 		 accumulated within the current node, or the node
+				 * 		 was cloned.
+				 */
 				if (child == nullptr)
 					continue;
 
-				/*
-				NOTE: Only newly extended nodes from the `r_node` are
-					  considered for external scoring. This is done once
-					  per new node creation.
-				*/
+				/**
+				 * NOTE: Only newly extended nodes from the `r_node` are
+				 * 		 considered for external scoring. This is done once
+				 * 		 per new node creation.
+				 */
 				decoder->ext_scorer.run_ext_scoring(child, &lexicon_matcher, hotwords_fst, &hotwords_matcher);
 			}
 
@@ -279,12 +301,12 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 		pos_val = -1;
 		max_beam_score = std::numeric_limits<double>::lowest();
 		for (zctc::Node* w_node : writer) {
-			/*
-			NOTE: Updating the `score` and `ovrl_score` of the
-				  nodes, considering the AM probs, KenLM probs,
-				  lexicon penalty, hotword boosting values and
-				  beta word penalty.
-			*/
+			/**
+			 * NOTE: Updating the `score` and `ovrl_score` of the
+			 * 		 nodes, considering the AM probs, KenLM probs,
+			 * 		 lexicon penalty, hotword boosting values and
+			 * 		 beta word penalty.
+			 */
 			pos_val++;
 
 			beam_score = w_node->update_score(timestep, more_confident_repeats);
@@ -293,22 +315,21 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 				writer_remove_ids.emplace_back(pos_val);
 				continue;
 			}
-			/*
-			NOTE: Doing the update step here, to avoid
-				  the current timestep's repeat token prob
-				  of the node, getting included with a
-				  different symbol that is getting extended
-				  in this timestep, like,
-
-				-->        a -  (In this case, the probs will be acc to the curr node itself.)
-								(If the prev node has a most recent blank too, then new node)
-								(will also be created and the path will be extended.)
-				|
-			a ---->  (blank) -  (In this case, the probs will be acc to the curr node itself.)
-				|
-				-->        b -  (In this case, a new node is created and the path is extended.)
-
-			*/
+			/**
+			 * NOTE: Doing the update step here, to avoid
+			 * 		 the current timestep's repeat token prob
+			 * 		 of the node, getting included with a
+			 * 		 different symbol that is getting extended
+			 * 		 in this timestep, like,
+			 *
+			 * 		-->        	a - In this case, the probs will be acc to the curr node itself.
+			 * 						If the prev node has a most recent blank too, then new node
+			 * 						will also be created and the path will be extended.
+			 * 		|
+			 * 	a ------> (blank) - In this case, the probs will be acc to the curr node itself.
+			 * 		|
+			 * 		--> 	    b - In this case, a new node is created and the path is extended.
+			 */
 			if (beam_score > max_beam_score)
 				max_beam_score = beam_score;
 		}
@@ -432,11 +453,11 @@ zctc::Decoder::batch_decode(T* logits, int* ids, int* labels, int* timesteps, in
 			hotwords_fst = new fst::StdVectorFst();
 			free_hw_fst = true;
 		} else {
-			/*
-			NOTE: The reason for cloning `hotwords_fst` is to avoid
-				  unncessary overwriting of the parameterly passed
-				  `hotwords_fst`.
-			*/
+			/**
+			 * NOTE: The reason for cloning `hotwords_fst` is to avoid
+			 * 		 unncessary overwriting of the parameterly passed
+			 * 		 `hotwords_fst`.
+			 */
 			hotwords_fst = new fst::StdVectorFst(*hotwords_fst);
 			free_hw_fst = true;
 		}
@@ -523,11 +544,11 @@ zctc::Decoder::serial_decode(T* logits, int* ids, int* labels, int* timesteps, i
 			hotwords_fst = new fst::StdVectorFst();
 			free_hw_fst = true;
 		} else {
-			/*
-			NOTE: The reason for cloning `hotwords_fst` is to avoid
-				  unncessary overwriting of the parameterly passed
-				  `hotwords_fst`.
-			*/
+			/**
+			 * NOTE: The reason for cloning `hotwords_fst` is to avoid
+			 * 		 unncessary overwriting of the parameterly passed
+			 * 		 `hotwords_fst`.
+			 */
 			hotwords_fst = new fst::StdVectorFst(*hotwords_fst);
 			free_hw_fst = true;
 		}

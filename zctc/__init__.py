@@ -1,4 +1,4 @@
-__all__ = ["CTCDecoder", "ZFST"]
+__all__ = ["CTCBeamDecoder", "ZFST"]
 
 import logging
 from typing import Optional, Tuple, Union
@@ -8,6 +8,21 @@ from _zctc import _ZFST, _Decoder, _Fst
 
 
 def _get_apostrophe_id_from_vocab(vocab: list[str]) -> int:
+    """
+    Find the apostrophe token id from the vocabulary.
+    This is used in decoding to handle word boundaries correctly.
+
+    Parameters
+    ----------
+    vocab: list[str]
+        Vocabulary of the model.
+
+    Returns
+    -------
+    apostrophe_id: int
+        The index of the apostrophe token in the vocabulary.
+        Returns -1 if the apostrophe token is not found.
+    """
     for i, tok in enumerate(vocab):
         if tok == "'":
             return i
@@ -15,27 +30,53 @@ def _get_apostrophe_id_from_vocab(vocab: list[str]) -> int:
     return -1
 
 
-class CTCDecoder(_Decoder):
+class CTCBeamDecoder(_Decoder):
     """
     A fast and efficient CTC beam decoder with C++ backend.
+    This decoder supports hotwords, lexicon FST, and language model scoring,
+    where,
+        - hotwords are tokens that can be inserted into the decoded sequence
+        with a specified weight.
+        - lexicon FST is a finite state transducer build from ZFST.
+        - language model scoring is done using KenLM build language model.
 
-    Args:
-        thread_count: Number of threads to use for decoding.
-        blank_id: The blank token id.
-        cutoff_top_n: Number of candidate tokens to parse per timeframe (sorted descendingly).
-        cutoff_prob: Candidate tokens to consider whose cumulative probability threshold [0, 1]
-                     reaches this value (sorted descendingly).
-        alpha: Language model weight.
-        beta: Word insertion weight.
-        beam_width: Beam width to use for decoding.
-        vocab: Vocabulary of the model.
-        unk_lexicon_penalty: Penalty to apply for unknown tokens in the lexicon.
-        min_tok_prob: Minimum probability for a token to consider in a timeframe.
-        max_beam_deviation: Maximum beam deviation value from the top most beam.
-        tok_sep: Token separator used in vocabulary tokens.
-                 Eg: "#" in "##a" for BPE tokens.
-        lm_path: Path to KenLM build language model file (either `bin` or `arpa`).
-        lexicon_fst_path: Path to ZFST build lexicon file (either `fst` or `fst.opt`).
+
+    Parameters
+    ----------
+    thread_count: int
+        Number of threads to use for decoding.
+    blank_id: int
+        The blank token id.
+    cutoff_top_n: int
+        Number of candidate tokens to parse per timeframe (sorted descendingly).
+    cutoff_prob: float
+        Candidate tokens to consider whose cumulative probability threshold [0, 1]
+        reaches this value (sorted descendingly).
+    alpha: float
+        Language model weight.
+    beta: float
+        Word insertion weight.
+    beam_width: int
+        Beam width to use for decoding.
+    vocab: list[str]
+        Vocabulary of the model.
+    unk_lexicon_penalty: float = -5.0
+        Penalty to apply for unknown tokens in the lexicon.
+    min_tok_prob: float = -5.0
+        Minimum probability for a token to consider in a timeframe.
+    max_beam_deviation: float = -10.0
+        Maximum beam deviation value from the top most beam.
+        EG:
+            If the top most beam has a score of 10.0, and the
+            `max_beam_deviation` is set to -5.0, then the beams
+            with scores less than 5.0 will be pruned.
+    tok_sep: str = "#"
+        Token separator used in vocabulary tokens.
+        Eg: "#" in "##a" for BPE tokens.
+    lm_path: Optional[str] = None
+        Path to KenLM build language model file (either `bin` or `arpa`).
+    lexicon_fst_path: Optional[str] = None
+        Path to ZFST build lexicon file (either `fst` or `fst.opt`).
     """
 
     def __init__(
@@ -88,37 +129,50 @@ class CTCDecoder(_Decoder):
         """
         Expecting the logits to be softmaxed and not in log scale.
 
-        Args:
-            logits: Input logits from model (batch_size, seq_len, vocab_size),
-                    can be of type `torch.float32` or `torch.float64`.
-            seq_lens: Length of each unpadded sequence in the batch.
-            hotwords_id: List of hotword tokens.
-            hotwords_weight: List of weights for each hotword token or a single weight
-                             for all hotword tokens.
-            hotwords_fst: Hotword FST object build using `self.generate_hw_fst` method.
+        Parameters
+        ----------
+        logits: torch.Tensor
+            Input logits from model (batch_size, seq_len, vocab_size),
+            can be of type `torch.float32` or `torch.float64`.
+        seq_lens: torch.Tensor
+            Length of each unpadded sequence in the batch.
+        hotwords_id: list[list[int]]
+            List of hotword tokens, where each inner list contains the token ids
+            of the hotword. If no hotwords are provided, this can be an empty list
+            or a list of empty lists.
+        hotwords_weight: Union[float, list[float]]
+            List of weights for each hotword token or a single weight for all hotword tokens.
+            If a single float is provided, it will be used as the weight for all hotwords.
+            If a list is provided, it should match the length of `hotwords_id`.
+        hotwords_fst: _Fst
+            Hotword FST object build using `self.generate_hw_fst` method.
 
-        Returns:
-            A tuple containing the following:
-                - labels: Decoded labels (batch_size, beam_width, seq_len).
-                - timesteps: Timesteps of the decoded labels (batch_size, beam_width, seq_len).
-                - seq_pos: Start index of both labels and timesteps (batch_size, beam_width).
+        Returns
+        -------
+        labels: torch.Tensor
+            Decoded labels (batch_size, beam_width, seq_len).
+        timesteps: torch.Tensor
+            Timesteps of the decoded labels (batch_size, beam_width, seq_len).
+        seq_pos: torch.Tensor
+            Start index of both labels and timesteps (batch_size, beam_width).
+
+        Raises
+        ------
+            ValueError: If the shape of `logits` is not (batch_size, seq_len, vocab_size)
+                        or if the shape of `seq_lens` is not (batch_size).
+            AssertionError: If the vocab size of `logits` does not match the decoder's vocab size.
         """
-
         if logits.ndim != 3:
             raise ValueError(
                 f"Invalid logits shape {logits.shape}, expecting (batch_size, seq_len, vocab_size)"
             )
-        elif seq_lens.ndim != 1:
+        if seq_lens.ndim != 1:
             raise ValueError(
                 f"Invalid seq_lens shape {seq_lens.shape}, expecting (batch_size)"
             )
 
         if logits.device.type != "cpu":
-            logits = (
-                logits.detach().cpu().contiguous(memory_format=torch.preserve_format)
-            )
-        elif not logits.is_contiguous():
-            logits = logits.contiguous(memory_format=torch.preserve_format)
+            logits = logits.detach().cpu()
         else:
             logits = logits.detach()
 
@@ -135,23 +189,17 @@ class CTCDecoder(_Decoder):
         if isinstance(hotwords_weight, float):
             hotwords_weight = [hotwords_weight] * len(hotwords_id)
 
-#TODO : sort hotwords in descending based on weight, and for same weight
-#sort in ascending based on token length...
-
+        # TODO: sort hotwords in descending based on weight, and for 
+        #       same weight sort in ascending based on token length.
         sorted_indices = (
             torch.argsort(logits, dim=2, descending=True)
             .to("cpu", torch.int32)
-            .contiguous(memory_format=torch.preserve_format)
         )
-        labels = torch.empty(
+        labels = torch.zeros((batch_size, self.beam_width, seq_len), dtype=torch.int32)
+        timesteps = torch.zeros(
             (batch_size, self.beam_width, seq_len), dtype=torch.int32
-        ).contiguous(memory_format=torch.preserve_format)
-        timesteps = torch.empty(
-            (batch_size, self.beam_width, seq_len), dtype=torch.int32
-        ).contiguous(memory_format=torch.preserve_format)
-        seq_pos = torch.empty(
-            (batch_size, self.beam_width), dtype=torch.int32
-        ).contiguous(memory_format=torch.preserve_format)
+        )
+        seq_pos = torch.zeros((batch_size, self.beam_width), dtype=torch.int32)
 
         self.batch_decode(
             logits.data_ptr(),
@@ -180,49 +228,59 @@ class CTCDecoder(_Decoder):
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Expecting the logits to be softmaxed and not in log scale.
-
         NOTE: This method should only be used with the `DEBUG` mode
-            build of the `zctc`.
+              build of the `zctc`.
 
-        Args:
-            logits: Input logits from model (batch_size, seq_len, vocab_size),
-                    can be of type `torch.float32` or `torch.float64`.
-            seq_lens: Length of each unpadded sequence in the batch.
-            hotwords_id: List of hotword tokens.
-            hotwords_weight: List of weights for each hotword token or a single weight
-                             for all hotword tokens.
-            hotwords_fst: Hotword FST object build using `self.generate_hw_fst` method.
+        Parameters
+        ----------
+        logits: torch.Tensor
+            Input logits from model (batch_size, seq_len, vocab_size),
+            can be of type `torch.float32` or `torch.float64`.
+        seq_lens: torch.Tensor
+            Length of each unpadded sequence in the batch.
+        hotwords_id: list[list[int]]
+            List of hotword tokens, where each inner list contains the token ids
+            of the hotword. If no hotwords are provided, this can be an empty list
+            or a list of empty lists.
+        hotwords_weight: Union[float, list[float]]
+            List of weights for each hotword token or a single weight for all hotword tokens.
+            If a single float is provided, it will be used as the weight for all hotwords.
+            If a list is provided, it should match the length of `hotwords_id`.
+        hotwords_fst: _Fst
+            Hotword FST object build using `self.generate_hw_fst` method.
 
-        Returns:
-            A tuple containing the following:
-                - labels: Decoded labels (batch_size, beam_width, seq_len).
-                - timesteps: Timesteps of the decoded labels (batch_size, beam_width, seq_len).
-                - seq_pos: Start index of both labels and timesteps (batch_size, beam_width).
+        Returns
+        -------
+        labels: torch.Tensor
+            Decoded labels (batch_size, beam_width, seq_len).
+        timesteps: torch.Tensor
+            Timesteps of the decoded labels (batch_size, beam_width, seq_len).
+        seq_pos: torch.Tensor
+            Start index of both labels and timesteps (batch_size, beam_width).
 
-        Raises:
+        Raises
+        ------
+            ValueError: If the shape of `logits` is not (batch_size, seq_len, vocab_size)
+                        or if the shape of `seq_lens` is not (batch_size).
+            AssertionError: If the vocab size of `logits` does not match the decoder's vocab size.
             AttributeError: If the method is called with the `RELEASE` mode
-                build of the `zctc`.
+                            build of the `zctc`.
         """
         if not hasattr(self, "serial_decode"):
             raise AttributeError(
                 "This method can only be used with the `DEBUG` mode build of the `zctc`."
             )
-
         if logits.ndim != 3:
             raise ValueError(
                 f"Invalid logits shape {logits.shape}, expecting (batch_size, seq_len, vocab_size)"
             )
-        elif seq_lens.ndim != 1:
+        if seq_lens.ndim != 1:
             raise ValueError(
                 f"Invalid seq_lens shape {seq_lens.shape}, expecting (batch_size)"
             )
 
         if logits.device.type != "cpu":
-            logits = (
-                logits.detach().cpu().contiguous(memory_format=torch.preserve_format)
-            )
-        elif not logits.is_contiguous():
-            logits = logits.contiguous(memory_format=torch.preserve_format)
+            logits = logits.detach().cpu()
         else:
             logits = logits.detach()
 
@@ -239,23 +297,17 @@ class CTCDecoder(_Decoder):
         if isinstance(hotwords_weight, float):
             hotwords_weight = [hotwords_weight] * len(hotwords_id)
 
-#TODO : sort hotwords in descending based on weight, and for same weight
-#sort in ascending based on token length...
+        # TODO: sort hotwords in descending based on weight, and for
+        #       same weight sort in ascending based on token length.
 
-        sorted_indices = (
-            torch.argsort(logits, dim=2, descending=True)
-            .to("cpu", torch.int32)
-            .contiguous(memory_format=torch.preserve_format)
+        sorted_indices = torch.argsort(logits, dim=2, descending=True).to(
+            "cpu", torch.int32
         )
-        labels = torch.empty(
-            (batch_size, self.beam_width, seq_len), dtype=torch.int32
-        ).contiguous(memory_format=torch.preserve_format)
+        labels = torch.empty((batch_size, self.beam_width, seq_len), dtype=torch.int32)
         timesteps = torch.empty(
             (batch_size, self.beam_width, seq_len), dtype=torch.int32
-        ).contiguous(memory_format=torch.preserve_format)
-        seq_pos = torch.empty(
-            (batch_size, self.beam_width), dtype=torch.int32
-        ).contiguous(memory_format=torch.preserve_format)
+        )
+        seq_pos = torch.empty((batch_size, self.beam_width), dtype=torch.int32)
 
         self.serial_decode(
             logits.data_ptr(),
@@ -284,9 +336,13 @@ class ZFST(_ZFST):
     """
     Lexicon FST builder for CTC decoder.
 
-    Args:
-        vocab_path: Path to the vocabulary file.
-        fst_path: Path to the output FST file.
+    Parameters
+    ----------
+    vocab_path: str
+        Path to the vocabulary file.
+    fst_path: Optional[str] = None
+        Path to the output existing build FST file. If not provided,
+        the FST will be initialized clean and empty.
     """
 
     def __init__(self, vocab_path: str, fst_path: Optional[str] = None):

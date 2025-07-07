@@ -245,10 +245,16 @@ zctc::parse_lexicon_file(zctc::ZFST* zfst, std::string file_path, int freq_thres
 	}
 
 	while (std::getline(file, line)) {
-		// Lexicon file format:
-		// freq-count actual-word *tokenized-version-of-the-word
-		// 1 the t ##h ##e
-
+		/**
+		 * NOTE: Lexicon file format:
+		 * 		 freq-count actual-word *tokenized-version-of-the-word
+		 *
+		 * 		 Example:
+		 * 		 1 			the 		t ##h ##e
+		 *
+		 * 		 The file is generally space seperated. But here, for
+		 * 		 clarity, it was depicted with tabs.
+		 */
 		std::istringstream iss(line);
 		iss >> freq;
 		if (freq < freq_threshold) {

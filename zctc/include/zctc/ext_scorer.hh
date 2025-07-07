@@ -132,12 +132,12 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node* node, fst::SortedMatcher<fst::
 		if (word_id == this->lm->BaseVocabulary().NotFound()) {
 			node->lm_lex_score += -1000; // OOV char
 		} else {
-			/*
-			NOTE: Since KenLM returns the log probability with base 10,
-				converting the log probability to base e, using,
-
-				logb(x) = loga(x) / loga(b)
-			*/
+			/**
+			 * NOTE: Since KenLM returns the log probability with base 10,
+			 * 		 converting the log probability to base e, using,
+			 *
+			 * 		 logb(x) = loga(x) / loga(b)
+			 */
 			node->lm_lex_score
 				+= (this->alpha
 					* (this->lm->BaseScore(&(node->parent->lm_state), word_id, &(node->lm_state)) / zctc::LOG_A_OF_B))
@@ -148,10 +148,9 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node* node, fst::SortedMatcher<fst::
 	this->start_of_word_check(node, hotwords_fst);
 
 	if (this->lexicon) {
-		/*
-		NOTE: Improper combinations of tokens are penalized with `lex_penalty`.
-		*/
-
+		/**
+		 * NOTE: Improper combinations of tokens are penalized with `lex_penalty`.
+		 */
 		if (!(node->parent->is_lex_path || node->is_start_of_word)) {
 
 			node->is_lex_path = false;
@@ -173,13 +172,12 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node* node, fst::SortedMatcher<fst::
 		}
 	}
 
-	/*
-	NOTE: Hotword scores and beta word penalty were accumulated in seperate variable
-		  because, these values will not be passed hereditarily to the child nodes.
-
-		  But, the language model and lexicon scores will be passed to the child nodes.
-	*/
-
+	/**
+	 * NOTE: Hotword scores and beta word penalty were accumulated in seperate variable
+	 * 		 because, these values will not be passed hereditarily to the child nodes.
+	 *
+	 * 		 But, the language model and lexicon scores will be passed to the child nodes.
+	 */
 	if (hotwords_fst && (node->parent->is_hotpath || node->is_start_of_word)) {
 
 		fst::StdVectorFst::StateId state = node->is_start_of_word ? node->hotword_state : node->parent->hotword_state;
@@ -187,11 +185,11 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node* node, fst::SortedMatcher<fst::
 
 		if (hotwords_matcher->Find(node->id)) {
 			const fst::StdArc& arc = hotwords_matcher->Value();
-			/*
-			NOTE: Here,
-				arc.olabel is the token length so far in the hotword,
-				arc.weight.Value() is the weight for each hotword token.
-			*/
+			/**
+			 * NOTE: Here,
+			 * 		 arc.olabel is the token length so far in the hotword,
+			 * 		 arc.weight.Value() is the weight for each hotword token.
+			 */
 			node->hotword_state = arc.nextstate;
 			node->hw_score = (arc.olabel * arc.weight.Value());
 			node->is_hotpath = true;
