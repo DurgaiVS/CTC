@@ -128,6 +128,9 @@ class CTCBeamDecoder(_Decoder):
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Expecting the logits to be softmaxed and not in log scale.
+        NOTE: Hotwords provided should be sorted in descending order
+              based on their weights, and for same weight, should be
+              sorted in ascending order based on the length of the token.
 
         Parameters
         ----------
@@ -189,8 +192,6 @@ class CTCBeamDecoder(_Decoder):
         if isinstance(hotwords_weight, float):
             hotwords_weight = [hotwords_weight] * len(hotwords_id)
 
-        # TODO: sort hotwords in descending based on weight, and for 
-        #       same weight sort in ascending based on token length.
         sorted_indices = (
             torch.argsort(logits, dim=2, descending=True)
             .to("cpu", torch.int32)
@@ -230,6 +231,10 @@ class CTCBeamDecoder(_Decoder):
         Expecting the logits to be softmaxed and not in log scale.
         NOTE: This method should only be used with the `DEBUG` mode
               build of the `zctc`.
+        NOTE: Hotwords provided should be sorted in descending order
+              based on their weights, and for same weight, should be
+              sorted in ascending order based on the length of the token.
+
 
         Parameters
         ----------
@@ -296,9 +301,6 @@ class CTCBeamDecoder(_Decoder):
 
         if isinstance(hotwords_weight, float):
             hotwords_weight = [hotwords_weight] * len(hotwords_id)
-
-        # TODO: sort hotwords in descending based on weight, and for
-        #       same weight sort in ascending based on token length.
 
         sorted_indices = torch.argsort(logits, dim=2, descending=True).to(
             "cpu", torch.int32
