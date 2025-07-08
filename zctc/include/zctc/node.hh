@@ -235,22 +235,17 @@ log_diff_exp(T x, T y)
 double
 zctc::Node::update_score(int curr_ts, std::vector<zctc::Node*>& more_confident_repeats)
 {
-	/**
-	 * NOTE: In case, if a node encounters a blank and a repeat token
-	 * 		 at the same timestep, this could cause the node to have
-	 * 		 two calls to this function, which could lead to the
-	 * 		 node's score to be updated twice, which is not desirable.
-	 *
-	 * 		 To avoid a check when inserting the nodes into the writer,
-	 * 		 we are going with this approach.
-	 */
 	if (this->_max_prob > this->max_prob) {
 
 		if (this->childs.size() != 0) {
 			/**
 			 * NOTE: This is a more confident repeat token,
-			 * 		 so, we'll create a new node and update the
-			 * 		 score with the most confident probability.
+			 * 		 and it has some childs, so we can't
+			 * 		 just overwrite within the same node,
+			 * 		 as it will affect the path's timestamp
+			 * 		 order, so, we'll create a new node and
+			 * 		 update the score with the most confident
+			 * 		 probability.
 			 */
 			Node* node = new Node(*this);
 			more_confident_repeats.emplace_back(node);
@@ -275,7 +270,7 @@ zctc::Node::update_score(int curr_ts, std::vector<zctc::Node*>& more_confident_r
 	/**
 	 * NOTE: Here,
 	 * 		 `*_prob` will be in linear scale,
-	 * 		 `*_score, ` will be in log scale,
+	 * 		 `*_score` will be in log scale,
 	 */
 	double prev_score = this->score;
 	this->score = prev_score + std::log(this->tk_prob + this->b_prob);
@@ -333,17 +328,18 @@ zctc::Node::acc_prob(double prob, std::vector<zctc::Node*>& writer)
 	 * 			|
 	 * 			--> a(but more confident)
 	 *
-	 * 		 the above case will be encountered as two different paths,
+	 * 		 Assume you're parsing the `parent` node, and in the above
+	 * 		 case, you are encountering a `blank` and a more confident
+	 * 		 `repeat`. So, we can conclude it as two different paths,
 	 *
 	 * 		 1. a -> some childs
 	 * 		 2. a -> (blank | a)
 	 *
-	 * 		 if we accept the token probability, we have to update the
-	 * 		 timestep too, so, we won't consider the token and blank
-	 * 		 probs for the first path, so the child nodes won't have
-	 * 		 a mess in the timestep order, and for the second path,
-	 * 		 we'll consider both probs (if provided) as well as the
-	 * 		 blank probs.
+	 * 		 coz, if we accept the token probability, we have to update
+	 * 		 the timestep too, so, we won't consider the token and blank
+	 * 		 probs for the first path, so the child nodes won't have a
+	 * 		 mess in the timestep order, and for the second path, we'll
+	 * 		 consider both probs (if provided) as well as the blank probs.
 	 */
 	if (!this->is_at_writer) {
 		writer.emplace_back(this);
@@ -375,13 +371,19 @@ zctc::Node::acc_tk_and_parent_prob(double prob, std::vector<zctc::Node*>& writer
 		this->is_at_writer = true;
 	}
 	/**
-	 * NOTE: Please look at `acc_prob` functions comment to understand
-	 * 		 how we are handling duplicate but more confident token.
+	 * NOTE: Please look at `acc_prob` function to understand how
+	 * 		 we are handling duplicate but more confident token.
 	 */
 	if (prob > this->max_prob) {
 		this->_max_prob = prob;
 	}
 
+	/**
+	 * NOTE: Since, there is a possibility that the `parent` node's
+	 * 		  score can be changed from the time the child was created,
+	 * 		  we need to check, and accumulate the updated score
+	 * 		 along with the token probability to the `squash_score`.
+	 */
 	if ((!this->only_prev_b) && (this->parent->score == this->p_score)) {
 		this->tk_prob = prob;
 
@@ -420,8 +422,18 @@ zctc::Node::acc_repeat_token_prob_for_cloned(int ts, double prob, zctc::Node* r_
 {
 
 	zctc::Node* child;
+	/**
+	 * NOTE: If it has no childs, then we can just
+	 * 		 move the node to the `clone` node's
+	 * 		 `childs` list, and remove it from the
+	 * 		 `alt_childs` list, which is the `childs`
+	 * 		 list of the `source` node.
+	 *
+	 * 		 But, if it has childs, then we
+	 * 		 need to create a new node using the
+	 * 		 `clone constructor`.
+	 */
 	if (r_node->childs.size() == 0) {
-		// Delete this r_node ref from the alt_childs list.
 		child = r_node;
 		child->parent = this;
 		if (!child->is_at_writer) {
@@ -529,7 +541,9 @@ zctc::Node::acc_repeat_token_prob(int ts, double prob, std::vector<zctc::Node*>&
 
 		/**
 		 * NOTE: If the child is not available, then we can create a new child.
-		 * 		 NOTE, here we are using the `only_prev_prob` flag, to indicate
+		 *
+		 * 		 Here,
+		 * 		 we are using the `only_prev_prob` flag, to indicate
 		 * 		 that the extended node is preceeded by a blank, so if the current
 		 * 		 node has both `blank` and `token` encountered previously, then
 		 * 		 we'll only consider the previous `blank`.

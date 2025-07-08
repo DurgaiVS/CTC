@@ -142,7 +142,7 @@ zctc::init_fst(fst::StdVectorFst* fst)
 }
 
 /**
- * @brief Optimize the FST by removing epsilon, determinizing and minimizing.
+ * @brief Optimize the FST by removing epsilon transitions, determinizing and minimizing.
  */
 void
 zctc::ZFST::optimize()

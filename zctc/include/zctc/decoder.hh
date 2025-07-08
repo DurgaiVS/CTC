@@ -90,7 +90,9 @@ public:
 	}
 
 #ifndef NDEBUG
-	// NOTE: This function is only for debugging purpose.
+	/**
+	 * @note This function is only for debugging purpose. It will only be compiled in debug mode build.
+	 */
 	template <typename T>
 	void serial_decode(T* logits, int* ids, int* labels, int* timesteps, int* seq_len, int* seq_pos,
 					   const int batch_size, const int max_seq_len, std::vector<std::vector<int>>& hotwords_id,
@@ -254,6 +256,16 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 				 */
 				for (zctc::Node* r_node : reader) {
 					r_node->b_prob = prob;
+					/**
+					 * NOTE: In case, if a node encounters a blank and a repeat token
+					 * 		 at the same timestep, this could cause the node to have
+					 * 		 two entries at writer vector, which could lead to the
+					 * 		 node's score to be updated twice, which is not desirable.
+					 *
+					 * 		 We're using a flag `is_at_writer` to check if the
+					 * 		 node is already at the writer, and if it is, then we
+					 * 		 won't add it again to the writer.
+					 */
 					if (!r_node->is_at_writer) {
 						writer.emplace_back(r_node);
 						r_node->is_at_writer = true;
@@ -334,6 +346,27 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 				max_beam_score = beam_score;
 		}
 
+		/**
+		 * NOTE: If we encounter a most confident repeat token,
+		 * 		 then we need to replace the node from the writer
+		 * 		 with the new node, if it has no childs.
+		 * 		 If it has childs, then we need to remove the
+		 * 		 node from the writer and deprecate it, but the
+		 * 		 path would still exist, like,
+		 *
+		 * 			---> a2 (more confident)
+		 * 			|
+		 * 		 a1 -
+		 * 			|
+		 * 			---> b
+		 *
+		 * 		 In this case, the `a1` node will be removed from the writer
+		 * 		 but the `b` node will still exist in the writer. And any path
+		 * 		 which had `a1` as the last node, will now be replaced with
+		 * 		 `a2` as the last node.
+		 * 		 And, any path which had `a1` within the path, will remain
+		 * 		 unchanged, but the `a1` node will be deprecated.
+		 */
 		remove_from_source(writer, writer_remove_ids);
 		for (zctc::Node* repeat_node : more_confident_repeats) {
 			writer.emplace_back(repeat_node);
@@ -344,6 +377,17 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 		if (writer.size() <= decoder->beam_width)
 			continue;
 
+		/**
+		 * NOTE: Pruning the writer nodes based on the `max_beam_score_deviation`
+		 * 		 and the `max_beam_score` of the current timestep, like,
+		 *
+		 * 		 If,
+		 * 			top most node's score = 0.9
+		 * 			max_beam_score_deviation = -0.5
+		 *
+		 * 		 Then, the nodes with score less than 0.4 will be removed from the
+		 * 		 writer.
+		 */
 		pos_val = 0;
 		beam_score = max_beam_score + decoder->max_beam_score_deviation;
 		for (zctc::Node* w_node : writer) {
@@ -356,6 +400,13 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 		if (writer.size() <= decoder->beam_width)
 			continue;
 
+		/**
+		 * NOTE: Moving the top `beam_width` nodes to the start of the
+		 * 		 writer vector, so the remaining nodes can be removed.
+		 * 		 Sorting is not required here, as we already have
+		 * 		 `Parlance` style of pruning the nodes based on their
+		 * 		 score, as mentioned above.
+		 */
 		std::nth_element(writer.begin(), writer.begin() + decoder->beam_width, writer.end(),
 						 Decoder::descending_compare);
 		// TODO: Try `resize()` instead of `erase()`, to avoid memory issue during benchmarking.
@@ -365,6 +416,12 @@ decode(const Decoder* decoder, T* logits, int* ids, int* label, int* timestep, c
 	std::vector<zctc::Node*>& reader = ((seq_len % 2) == 0 ? prefixes0 : prefixes1);
 	std::sort(reader.begin(), reader.end(), Decoder::descending_compare);
 
+	/**
+	 * NOTE: Write the final path in reverse order, from the end of the
+	 * 		 label and timestep arrays, to avoid the need of reversing
+	 * 		 the arrays at the end(since we only have the prefix tree
+	 * 		 end leafs reference, we have to go from the bottom).
+	 */
 	iter_val = 1;
 	curr_p = seq_pos;
 	for (zctc::Node* r_node : reader) {
