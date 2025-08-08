@@ -100,6 +100,18 @@ class CTCBeamDecoder(_Decoder):
         if apostrophe_id < 0:
             logging.warning("Cannot find apostrophe token from the vocab provided")
 
+        self.evaluate_parameters(
+            thread_count,
+            blank_id,
+            cutoff_top_n,
+            cutoff_prob,
+            alpha,
+            beta,
+            beam_width,
+            len(vocab),
+            max_beam_deviation,
+        )
+
         super().__init__(
             thread_count,
             blank_id,
@@ -192,9 +204,8 @@ class CTCBeamDecoder(_Decoder):
         if isinstance(hotwords_weight, float):
             hotwords_weight = [hotwords_weight] * len(hotwords_id)
 
-        sorted_indices = (
-            torch.argsort(logits, dim=2, descending=True)
-            .to("cpu", torch.int32)
+        sorted_indices = torch.argsort(logits, dim=2, descending=True).to(
+            "cpu", torch.int32
         )
         labels = torch.zeros((batch_size, self.beam_width, seq_len), dtype=torch.int32)
         timesteps = torch.zeros(
@@ -332,6 +343,43 @@ class CTCBeamDecoder(_Decoder):
         raise NotImplementedError(
             "Override `__call__` method when inheriting from this class"
         )
+
+    @staticmethod
+    def evaluate_parameters(
+        thread_count: int,
+        blank_id: int,
+        cutoff_top_n: int,
+        cutoff_prob: float,
+        alpha: float,
+        beta: float,
+        beam_width: int,
+        vocab_size: int,
+        max_beam_deviation: float = -10.0,
+    ) -> bool:
+        """
+        Validate the parameters for the CTCBeamDecoder.
+
+        Parameters
+        ----------
+        thread_count, blank_id, cutoff_top_n, cutoff_prob, alpha, beta, beam_width, vocab_size, max_beam_deviation : int or float
+            Parameters to validate.
+
+        Returns
+        -------
+        bool
+            True if all parameters are valid.
+        """
+        assert thread_count > 0, "Thread count must be greater than 0"
+        assert vocab_size > 0, "Vocabulary size must be greater than 0"
+        assert blank_id >= 0, "Blank ID must be non-negative"
+        assert 0 <= cutoff_prob <= 1, "Cutoff probability must be in [0, 1]"
+        assert alpha >= 0, "Alpha must be non-negative"
+        assert beta >= 0, "Beta must be non-negative"
+        assert beam_width > 0, "Beam width must be greater than 0"
+        assert max_beam_deviation < 0, "Max beam deviation must be negative"
+        assert (
+            vocab_size >= cutoff_top_n > 0
+        ), "Cutoff top N must be between 1 and vocab size"
 
 
 class ZFST(_ZFST):

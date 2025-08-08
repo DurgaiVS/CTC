@@ -1,17 +1,17 @@
 #! /usr/bin/env python
 
 import os
-import requests
-import sys
 import subprocess
+import sys
 import tarfile
-
+from distutils.command.build_ext import build_ext
+from distutils.extension import Extension
 from io import BytesIO
 from pathlib import Path
 from sysconfig import get_paths
 from tempfile import TemporaryDirectory
-from distutils.extension import Extension
-from distutils.command.build_ext import build_ext
+
+import requests
 
 
 class CMakeExtension(Extension):
@@ -48,27 +48,26 @@ class CMakeBuild(build_ext):
         del res
 
         # example of cmake args
-        config = 'Debug' if self.debug else 'Release'
+        config = "Debug" if self.debug else "Release"
         cmake_args = [
-            '-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=' + str(extdir.parent.absolute()),
-            '-DCMAKE_BUILD_TYPE=' + config,
-            '-DPYTHON_INCLUDE_DIR=' + str(get_paths()['include']),
-            '-DPYTHON_EXECUTABLE=' + str(sys.executable),
-            '-DCMAKE_INSTALL_PREFIX=' + str(src_dir / "zctc"),
-            '-DFST_DIR=' + str(Path(tmp_dir.name) / fst_v)
+            "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=" + str(extdir.parent.absolute()),
+            "-DCMAKE_BUILD_TYPE=" + config,
+            "-DPYTHON_INCLUDE_DIR=" + str(get_paths()["include"]),
+            "-DPYTHON_EXECUTABLE=" + str(sys.executable),
+            "-DCMAKE_INSTALL_PREFIX=" + str(src_dir / "zctc"),
+            "-DFST_DIR=" + str(Path(tmp_dir.name) / fst_v),
         ]
 
         # example of build args
-        build_args = [
-            '--config', config,
-            '--', '-j' + str(os.cpu_count())
-        ]
+        build_args = ["--config", config, "--", "-j" + str(os.cpu_count())]
 
         subprocess.run(
             ["cmake", str(ext.sourcedir), *cmake_args], cwd=build_temp, check=True
         )
         subprocess.run(
-            ["cmake", "--build", ".", "--target", "install", *build_args], cwd=build_temp, check=True
+            ["cmake", "--build", ".", "--target", "install", *build_args],
+            cwd=build_temp,
+            check=True,
         )
 
         tmp_dir.cleanup()
@@ -81,6 +80,8 @@ class CMakeBuild(build_ext):
 def build(setup_kwargs):
 
     setup_kwargs.update(
-        {"ext_modules": [CMakeExtension("_zctc", Path(__file__).parent)], "cmdclass": {"build_ext": CMakeBuild}}
+        {
+            "ext_modules": [CMakeExtension("_zctc", Path(__file__).parent)],
+            "cmdclass": {"build_ext": CMakeBuild},
+        }
     )
-      

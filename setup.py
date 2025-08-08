@@ -75,6 +75,7 @@ class CMakeBuild(build_ext):
 
             ext.library_dirs = [src_dir]
 
+
 setup(
     name="zctc",
     version="0.1",
@@ -89,13 +90,7 @@ setup(
         CMakeExtension(
             "_zctc",
             Path(__file__).parent,
-            [
-                "_zctc",
-                "kenlm_filter",
-                "kenlm_builder",
-                "kenlm_util",
-                "kenlm"
-            ]
+            ["_zctc", "kenlm_filter", "kenlm_builder", "kenlm_util", "kenlm"],
         )
     ],
     cmdclass={

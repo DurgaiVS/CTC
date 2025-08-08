@@ -1,12 +1,12 @@
 import gc
+import multiprocessing
 from pathlib import Path
 from time import time
 from typing import List
-import multiprocessing
 
 import torch
 from ctcdecode import CTCBeamDecoder
-from pyctcdecode import build_ctcdecoder, BeamSearchDecoderCTC
+from pyctcdecode import BeamSearchDecoderCTC, build_ctcdecoder
 from tqdm import tqdm
 
 from zctc import CTCBeamDecoder
@@ -20,6 +20,7 @@ MIN_TOK_PROB = 0
 MAX_BEAM_DEVIATION = 0
 FORK_POOL = multiprocessing.get_context("fork").Pool
 
+
 def read_vocab(vocab_path: str):
     vocab = []
 
@@ -30,6 +31,7 @@ def read_vocab(vocab_path: str):
 
     return vocab
 
+
 def collate_fn(batch: List[torch.Tensor]) -> torch.Tensor:
     col_batch = []
     max_len = max([logits.shape[-2] for logits in batch])
@@ -38,6 +40,7 @@ def collate_fn(batch: List[torch.Tensor]) -> torch.Tensor:
         col_batch.append(torch.nn.functional.pad(sample, (0, 0, 0, pad_len)))
 
     return torch.stack(col_batch)
+
 
 def yield_batch(filepath: List[Path], batch_size: int):
     for i in range(0, len(filepath), batch_size):
@@ -66,7 +69,10 @@ def zctc_ctc(decoder: CTCBeamDecoder, logits: torch.Tensor, seq_lens: torch.Tens
 
     return labels, timesteps
 
-def kensho_ctc(decoder: BeamSearchDecoderCTC, logits: torch.Tensor, seq_lens: torch.Tensor):
+
+def kensho_ctc(
+    decoder: BeamSearchDecoderCTC, logits: torch.Tensor, seq_lens: torch.Tensor
+):
 
     assert BATCH_SIZE > 0, "BATCH_SIZE should be greater than 0"
     assert BEAM_WIDTH > 0, "BEAM_WIDTH should be greater than 0"
@@ -75,7 +81,13 @@ def kensho_ctc(decoder: BeamSearchDecoderCTC, logits: torch.Tensor, seq_lens: to
 
     start = time()
     with FORK_POOL(processes=BATCH_SIZE) as pool:
-        op = decoder.decode_batch(pool, logits.squeeze().cpu().numpy(), BEAM_WIDTH, MAX_BEAM_DEVIATION, MIN_TOK_PROB)
+        op = decoder.decode_batch(
+            pool,
+            logits.squeeze().cpu().numpy(),
+            BEAM_WIDTH,
+            MAX_BEAM_DEVIATION,
+            MIN_TOK_PROB,
+        )
     end = time()
 
     global KENSHO_val
@@ -97,12 +109,13 @@ def parlance_ctc(decoder: CTCBeamDecoder, logits: torch.Tensor, seq_lens: torch.
 
 
 def infer_decoders(parlance_decoder, zctc_decoder, kensho_decoder, logits, seq_lens):
-    op_parlance, ts_parlance, out_seq_len = parlance_ctc(parlance_decoder, logits, seq_lens)
+    op_parlance, ts_parlance, out_seq_len = parlance_ctc(
+        parlance_decoder, logits, seq_lens
+    )
     op_zctc, ts_zctc = zctc_ctc(zctc_decoder, logits, seq_lens)
     op_kensho = kensho_ctc(kensho_decoder, logits, seq_lens)
 
     return op_parlance, ts_parlance, out_seq_len, op_zctc, ts_zctc, op_kensho
-
 
 
 if __name__ == "__main__":
@@ -121,9 +134,9 @@ if __name__ == "__main__":
     unk_score = -5.0
     min_tok_prob = -5.0
     max_beam_deviation = -10.0
-    lm_path = None # arpa or bin file generated from kenlm
-    lexicon_fst_path = None # fst file generated using ZFST
-    vocab_path = None # vocab file
+    lm_path = None  # arpa or bin file generated from kenlm
+    lexicon_fst_path = None  # fst file generated using ZFST
+    vocab_path = None  # vocab file
     vocab = read_vocab(vocab_path)
     vocab_size = len(vocab)
     tok_sep = "#"
@@ -169,12 +182,15 @@ if __name__ == "__main__":
         lexicon_fst_path,
     )
 
-    kensho_decoder = build_ctcdecoder([""] + vocab[1:], lm_path, alpha=alpha, beta=beta, unk_score_offset=unk_score)
-
+    kensho_decoder = build_ctcdecoder(
+        [""] + vocab[1:], lm_path, alpha=alpha, beta=beta, unk_score_offset=unk_score
+    )
 
     # warmups
     for _ in range(1):
-        logits = torch.randn((batch_size, seq_len, vocab_size), dtype=torch.float32).log_softmax(2)
+        logits = torch.randn(
+            (batch_size, seq_len, vocab_size), dtype=torch.float32
+        ).log_softmax(2)
 
         op_parlance, ts_parlance, out_seq_len, op_zctc, ts_zctc, op = infer_decoders(
             parlance_decoder, zctc_decoder, kensho_decoder, logits, seq_lens
@@ -184,12 +200,13 @@ if __name__ == "__main__":
     ZCTC_val, PARLANCE_val = 0, 0
     KENSHO_val, KENSHO_err = 0, 0
 
-
     iterations = 100
     interval = 20
 
     for i in tqdm(range(iterations), leave=False):
-        logits = torch.randn((batch_size, seq_len, vocab_size), dtype=torch.float32).log_softmax(2)
+        logits = torch.randn(
+            (batch_size, seq_len, vocab_size), dtype=torch.float32
+        ).log_softmax(2)
 
         op_parlance, ts_parlance, out_seq_len, op_zctc, ts_zctc, op = infer_decoders(
             parlance_decoder, zctc_decoder, kensho_decoder, logits, seq_lens
@@ -197,8 +214,12 @@ if __name__ == "__main__":
 
         if (i + 1) % iterations == 0:
             print(pattern)
-            print(f"AVG time for PARLANCE CTC after {i+1} runs: {PARLANCE_val / (i + 1):.5f}")
+            print(
+                f"AVG time for PARLANCE CTC after {i+1} runs: {PARLANCE_val / (i + 1):.5f}"
+            )
             print(f"AVG time for ZCTC CTC after {i+1} runs: {ZCTC_val / (i + 1):.5f}")
-            print(f"AVG time for KENSHO CTC after {i+1} runs: {KENSHO_val / (i + 1):.5f}")
+            print(
+                f"AVG time for KENSHO CTC after {i+1} runs: {KENSHO_val / (i + 1):.5f}"
+            )
 
             gc.collect()
