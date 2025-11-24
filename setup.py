@@ -2,6 +2,7 @@
 
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -17,10 +18,11 @@ from setuptools.command.build_ext import build_ext
 
 
 class CMakeExtension(Extension):
-    def __init__(self, name, source_dir: Path, libraries: List[str] = []):
+    def __init__(self, name, source_dir: Path, libraries: List[str], library_dir: Path):
         # don't invoke the original build_ext for this special extension
-        super().__init__(name, sources=[], libraries=libraries)
-        self.sourcedir = source_dir.resolve()
+        super().__init__(name, sources=[], libraries=libraries, library_dirs=[str(library_dir)])
+        self.sourcedir = source_dir
+        self._lib_dir = library_dir
 
 
 class CMakeBuild(build_ext):
@@ -45,7 +47,7 @@ class CMakeBuild(build_ext):
         fst_url = f"https://www.openfst.org/twiki/pub/FST/FstDownload/{fst_v}.tar.gz"
 
         with TemporaryDirectory() as tmp_dir:
-            res = requests.get(fst_url)
+            res = requests.get(fst_url, verify=False)
             with tarfile.open(fileobj=BytesIO(res.content)) as tar:
                 tar.extractall(tmp_dir)
             del res
@@ -53,11 +55,11 @@ class CMakeBuild(build_ext):
             # example of cmake args
             config = "Debug" if self.debug else "Release"
             cmake_args = [
-                "-DLIBRARY_OUTPUT_DIRECTORY=" + src_dir,
+                "-DLIBRARY_OUTPUT_DIRECTORY=" + str(ext._lib_dir),
                 "-DCMAKE_BUILD_TYPE=" + config,
                 "-DPYTHON_INCLUDE_DIR=" + str(get_paths()["include"]),
                 "-DPYTHON_EXECUTABLE=" + str(sys.executable),
-                "-DCMAKE_INSTALL_PREFIX=" + str(build_temp),
+                "-DCMAKE_INSTALL_PREFIX=" + str(ext._lib_dir.parent),
                 "-DFST_DIR=" + str(Path(tmp_dir) / fst_v),
             ]
 
@@ -73,8 +75,6 @@ class CMakeBuild(build_ext):
                 check=True,
             )
 
-            ext.library_dirs = [src_dir]
-
 
 setup(
     name="zctc",
@@ -83,14 +83,16 @@ setup(
     author="Durgai Vel Selvan M",
     author_email="durgaivel0309@gmail.com",
     packages=find_packages(str(Path(__file__).parent)),
-    # package_data={},
+    package_data={
+        'zctc': ['lib'],  # Include shared libraries
+    },
     include_package_data=True,
-    # libraries=[],
     ext_modules=[
         CMakeExtension(
             "_zctc",
-            Path(__file__).parent,
+            Path(__file__).parent.resolve(),
             ["_zctc", "kenlm_filter", "kenlm_builder", "kenlm_util", "kenlm"],
+            (Path(__file__).parent / "zctc/lib").resolve()
         )
     ],
     cmdclass={

@@ -157,14 +157,30 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node* node, fst::SortedMatcher<fst::
 			node->lm_lex_score += this->lex_penalty;
 
 		} else {
-
+			/**
+			 * NOTE: If the node is the start of word, then
+			 * 		 check whether the parent is a lexicon path or not.
+			 * 		 If yes, then continue from the parent's lexicon state.
+			 * 		 If not, then start from the initial state of the lexicon FST.
+			 */
 			fst::StdVectorFst::StateId state
-				= node->is_start_of_word ? node->lexicon_state : node->parent->lexicon_state;
+				= (node->is_start_of_word && (!node->is_lex_path)) ? node->lexicon_state : node->parent->lexicon_state;
 			lexicon_matcher->SetState(state);
 
 			if (lexicon_matcher->Find(node->id)) {
 				node->lexicon_state = lexicon_matcher->Value().nextstate;
 				node->is_lex_path = true;
+
+			} else if (node->is_start_of_word) {
+				lexicon_matcher->SetState(node->lexicon_state);
+				if (lexicon_matcher->Find(node->id)) {
+					node->lexicon_state = lexicon_matcher->Value().nextstate;
+					node->is_lex_path = true;
+				} else {
+					node->is_lex_path = false;
+					node->lm_lex_score += this->lex_penalty;
+				}
+
 			} else {
 				node->is_lex_path = false;
 				node->lm_lex_score += this->lex_penalty;
@@ -179,8 +195,14 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node* node, fst::SortedMatcher<fst::
 	 * 		 But, the language model and lexicon scores will be passed to the child nodes.
 	 */
 	if (hotwords_fst && (node->parent->is_hotpath || node->is_start_of_word)) {
-
-		fst::StdVectorFst::StateId state = node->is_start_of_word ? node->hotword_state : node->parent->hotword_state;
+		/**
+		 * NOTE: If the node is the start of word, then
+		 * 		 check whether the parent is a hotword path or not.
+		 * 		 If yes, then continue from the parent's hotword state.
+		 * 		 If not, then start from the initial state of the hotwords FST.
+		 */
+		fst::StdVectorFst::StateId state
+			= (node->is_start_of_word && (!node->is_hotpath)) ? node->hotword_state : node->parent->hotword_state;
 		hotwords_matcher->SetState(state);
 
 		if (hotwords_matcher->Find(node->id)) {
@@ -193,6 +215,15 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node* node, fst::SortedMatcher<fst::
 			node->hotword_state = arc.nextstate;
 			node->hw_score = (arc.olabel * arc.weight.Value());
 			node->is_hotpath = true;
+
+		} else if (node->is_start_of_word) {
+			hotwords_matcher->SetState(node->hotword_state);
+			if (hotwords_matcher->Find(node->id)) {
+				const fst::StdArc& arc = hotwords_matcher->Value();
+				node->hotword_state = arc.nextstate;
+				node->hw_score = (arc.olabel * arc.weight.Value());
+				node->is_hotpath = true;
+			}
 		}
 	}
 }

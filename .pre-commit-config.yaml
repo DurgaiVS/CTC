@@ -28,8 +28,8 @@ repos:
         args:
           - -style=file
           - -i
-          - "**/**/*hh"
-          - "**/*cpp"
+          - "**/**/*.hh"
+          - "**/*.cpp"
       - id: pylint
         name: pylint
         entry: pylint

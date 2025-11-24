@@ -76,15 +76,15 @@ if(TARGET lzma)
     target_link_libraries(_zctc PUBLIC lzma)
 endif()
 
-install(TARGETS _zctc LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
-set_target_properties(
-    _zctc
-    kenlm_filter
-    kenlm_builder
-    kenlm_util
-    kenlm
-    PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${LIBRARY_OUTPUT_DIRECTORY}
-)
+install(TARGETS _zctc kenlm_filter kenlm_builder kenlm_util kenlm LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
+# set_target_properties(
+#     _zctc
+#     kenlm_filter
+#     kenlm_builder
+#     kenlm_util
+#     kenlm
+#     PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${LIBRARY_OUTPUT_DIRECTORY}
+# )
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 
