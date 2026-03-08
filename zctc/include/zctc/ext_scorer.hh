@@ -13,11 +13,11 @@ public:
 	const bool enabled;
 	const char tok_sep;
 	const int apostrophe_id;
-	const double alpha, beta, lex_penalty;
+	const float alpha, beta, lex_penalty;
 	lm::base::Model* lm;
 	fst::StdVectorFst* lexicon;
 
-	ExternalScorer(char tok_sep, int apostrophe_id, double alpha, double beta, double lex_penalty, char* lm_path,
+	ExternalScorer(char tok_sep, int apostrophe_id, float alpha, float beta, float lex_penalty, char* lm_path,
 				   char* lexicon_path)
 		: enabled(lm_path || lexicon_path)
 		, tok_sep(tok_sep)
@@ -69,8 +69,9 @@ public:
  *
  * @return void
  */
+template <typename T>
 void
-zctc::ExternalScorer::start_of_word_check(zctc::Node* node, fst::StdVectorFst* hotwords_fst) const
+zctc::ExternalScorer::start_of_word_check(zctc::Node<T>* node, fst::StdVectorFst* hotwords_fst) const
 {
 	node->is_start_of_word = !(node->id == this->apostrophe_id || node->parent->id == this->apostrophe_id
 							   || node->token.at(0) == this->tok_sep);
@@ -94,8 +95,9 @@ zctc::ExternalScorer::start_of_word_check(zctc::Node* node, fst::StdVectorFst* h
  *
  * @return void
  */
+template <typename T>
 void
-zctc::ExternalScorer::initialise_start_states(zctc::Node* root, fst::StdVectorFst* hotwords_fst) const
+zctc::ExternalScorer::initialise_start_states(zctc::Node<T>* root, fst::StdVectorFst* hotwords_fst) const
 {
 	if (this->lexicon)
 		root->lexicon_state = this->lexicon->Start();
@@ -119,8 +121,9 @@ zctc::ExternalScorer::initialise_start_states(zctc::Node* root, fst::StdVectorFs
  *
  * @return void
  */
+template <typename T>
 void
-zctc::ExternalScorer::run_ext_scoring(zctc::Node* node, fst::SortedMatcher<fst::StdVectorFst>* lexicon_matcher,
+zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* node, fst::SortedMatcher<fst::StdVectorFst>* lexicon_matcher,
 									  fst::StdVectorFst* hotwords_fst,
 									  fst::SortedMatcher<fst::StdVectorFst>* hotwords_matcher) const
 {
@@ -164,14 +167,21 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node* node, fst::SortedMatcher<fst::
 			 * 		 If not, then start from the initial state of the lexicon FST.
 			 */
 			fst::StdVectorFst::StateId state
-				= (node->is_start_of_word && (!node->is_lex_path)) ? node->lexicon_state : node->parent->lexicon_state;
+				= (node->is_start_of_word && (!node->parent->is_lex_path)) ? node->lexicon_state : node->parent->lexicon_state;
 			lexicon_matcher->SetState(state);
 
+			/**
+			 * NOTE: If the node's parent is a valid lexicon path, and also the
+			 * 		 node is a start of the word, then we'll first check if the
+			 * 		 node is a proper lexicon child for the parent, if not, then
+			 * 		 we'll check if the start of the word is a seperate
+			 * 		 lexicon entity.
+			 */
 			if (lexicon_matcher->Find(node->id)) {
 				node->lexicon_state = lexicon_matcher->Value().nextstate;
 				node->is_lex_path = true;
 
-			} else if (node->is_start_of_word) {
+			} else if (node->is_start_of_word && node->parent->is_lex_path) {
 				lexicon_matcher->SetState(node->lexicon_state);
 				if (lexicon_matcher->Find(node->id)) {
 					node->lexicon_state = lexicon_matcher->Value().nextstate;
