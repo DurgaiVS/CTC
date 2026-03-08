@@ -45,10 +45,13 @@ public:
 			delete this->lexicon;
 	}
 
-	inline void start_of_word_check(Node* node, fst::StdVectorFst* hotwords_fst) const;
-	inline void initialise_start_states(Node* root, fst::StdVectorFst* hotwords_fst) const;
+	template <typename T>
+	inline void start_of_word_check(zctc::Node<T>* node, fst::StdVectorFst* hotwords_fst) const;
+	template <typename T>
+	inline void initialise_start_states(zctc::Node<T>* root, fst::StdVectorFst* hotwords_fst) const;
 
-	void run_ext_scoring(zctc::Node* node, fst::SortedMatcher<fst::StdVectorFst>* lexicon_matcher,
+	template <typename T>
+	void run_ext_scoring(zctc::Node<T>* node, fst::SortedMatcher<fst::StdVectorFst>* lexicon_matcher,
 						 fst::StdVectorFst* hotwords_fst,
 						 fst::SortedMatcher<fst::StdVectorFst>* hotwords_matcher) const;
 };
@@ -166,8 +169,9 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* node, fst::SortedMatcher<fs
 			 * 		 If yes, then continue from the parent's lexicon state.
 			 * 		 If not, then start from the initial state of the lexicon FST.
 			 */
-			fst::StdVectorFst::StateId state
-				= (node->is_start_of_word && (!node->parent->is_lex_path)) ? node->lexicon_state : node->parent->lexicon_state;
+			fst::StdVectorFst::StateId state = (node->is_start_of_word && (!node->parent->is_lex_path))
+												   ? node->lexicon_state
+												   : node->parent->lexicon_state;
 			lexicon_matcher->SetState(state);
 
 			/**
