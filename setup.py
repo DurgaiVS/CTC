@@ -20,7 +20,9 @@ from setuptools.command.build_ext import build_ext
 class CMakeExtension(Extension):
     def __init__(self, name, source_dir: Path, libraries: List[str], library_dir: Path):
         # don't invoke the original build_ext for this special extension
-        super().__init__(name, sources=[], libraries=libraries, library_dirs=[str(library_dir)])
+        super().__init__(
+            name, sources=[], libraries=libraries, library_dirs=[str(library_dir)]
+        )
         self.sourcedir = source_dir
         self._lib_dir = library_dir
 
@@ -84,7 +86,7 @@ setup(
     author_email="durgaivel0309@gmail.com",
     packages=find_packages(str(Path(__file__).parent)),
     package_data={
-        'zctc': ['lib'],  # Include shared libraries
+        "zctc": ["lib"],  # Include shared libraries
     },
     include_package_data=True,
     ext_modules=[
@@ -92,7 +94,7 @@ setup(
             "_zctc",
             Path(__file__).parent.resolve(),
             ["_zctc", "kenlm_filter", "kenlm_builder", "kenlm_util", "kenlm"],
-            (Path(__file__).parent / "zctc/lib").resolve()
+            (Path(__file__).parent / "zctc/lib").resolve(),
         )
     ],
     cmdclass={

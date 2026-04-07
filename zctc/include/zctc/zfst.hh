@@ -296,25 +296,29 @@ zctc::populate_hotword_fst(fst::StdVectorFst* fst, const std::vector<std::vector
 
 	for (int i = 0; i < hotwords.size(); i++) {
 		const std::vector<int>& tokens = hotwords[i];
-		hotword_weight = hotwords_weight[i];
-		hotword_split = hotword_weight / tokens.size();
 		state = fst->Start();
 
-		for (int j = 0; j < tokens.size(); j++) {
+		for (int j = 0; j < tokens.size();) {
 			token = tokens[j];
 			matcher.SetState(state);
+			j++;
 
 			if (matcher.Find(token)) {
 				state = matcher.Value().nextstate;
 				continue;
 			} else {
 				next_state = fst->AddState();
-				fst->AddArc(state, fst::StdArc(token, (j + 1), hotword_split, next_state));
+				fst->AddArc(state, fst::StdArc(token, j, hotword_weight, next_state));
 				state = next_state;
 				continue;
 			}
 		}
+		fst->SetFinal(state, fst::StdArc::Weight::Zero())
 	}
+
+	fst::RmEpsilon(fst);
+	fst::Determinize(*(fst), fst);
+	fst::Minimize(fst);
 }
 
 /**
@@ -327,7 +331,6 @@ zctc::populate_hotword_fst(fst::StdVectorFst* fst, const std::vector<std::vector
 void
 zctc::ZFST::load_vocab(char* vocab_path)
 {
-
 	int id = 0;
 	std::string line;
 	std::ifstream inputFile(vocab_path);

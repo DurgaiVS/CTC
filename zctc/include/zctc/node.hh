@@ -10,7 +10,7 @@
 #include "fst/fstlib.h"
 #include "lm/state.hh"
 
-#include "./constants.hh"
+#include "./utils.hh"
 
 namespace zctc {
 
@@ -422,8 +422,9 @@ zctc::Node<T>::acc_tk_and_parent_prob(T prob, std::vector<zctc::Node<T>*>& write
  */
 template <typename T>
 void
-zctc::Node<T>::acc_repeat_token_prob_for_cloned(int ts, T prob, zctc::Node<T>* r_node, std::vector<zctc::Node<T>*>& writer,
-											 std::vector<zctc::Node<T>*>& reader)
+zctc::Node<T>::acc_repeat_token_prob_for_cloned(int ts, T prob, zctc::Node<T>* r_node,
+												std::vector<zctc::Node<T>*>& writer,
+												std::vector<zctc::Node<T>*>& reader)
 {
 
 	zctc::Node<T>* child;
@@ -487,7 +488,7 @@ zctc::Node<T>::acc_repeat_token_prob_for_cloned(int ts, T prob, zctc::Node<T>* r
 template <typename T>
 zctc::Node<T>*
 zctc::Node<T>::acc_repeat_token_prob(int ts, T prob, std::vector<zctc::Node<T>*>& writer,
-								  std::vector<zctc::Node<T>*>& reader)
+									 std::vector<zctc::Node<T>*>& reader)
 {
 	/**
 	 * NOTE: In case, if the token is the most recent than the blank, or,
@@ -585,7 +586,7 @@ zctc::Node<T>::acc_repeat_token_prob(int ts, T prob, std::vector<zctc::Node<T>*>
 template <typename T>
 zctc::Node<T>*
 zctc::Node<T>::extend_path(int id, int ts, T prob, const std::string token, std::vector<zctc::Node<T>*>& writer,
-						std::vector<zctc::Node<T>*>& reader)
+						   std::vector<zctc::Node<T>*>& reader)
 {
 	if (id == this->id)
 		return this->acc_repeat_token_prob(ts, prob, writer, reader);
