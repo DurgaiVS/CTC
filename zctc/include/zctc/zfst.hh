@@ -296,6 +296,7 @@ zctc::populate_hotword_fst(fst::StdVectorFst* fst, const std::vector<std::vector
 
 	for (int i = 0; i < hotwords.size(); i++) {
 		const std::vector<int>& tokens = hotwords[i];
+		hotword_weight = hotwords_weight[i];
 		state = fst->Start();
 
 		for (int j = 0; j < tokens.size();) {
