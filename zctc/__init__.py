@@ -30,6 +30,23 @@ def _get_apostrophe_id_from_vocab(vocab: list[str]) -> int:
     return -1
 
 
+class ZFST(_ZFST):
+    """
+    Lexicon FST builder for CTC decoder.
+
+    Parameters
+    ----------
+    vocab_path: str
+        Path to the vocabulary file.
+    fst_path: Optional[str] = None
+        Path to the output existing build FST file. If not provided,
+        the FST will be initialized clean and empty.
+    """
+
+    def __init__(self, vocab_path: str, fst_path: Optional[str] = None):
+        super().__init__(vocab_path, fst_path)
+
+
 class CTCBeamDecoder(_Decoder):
     """
     A fast and efficient CTC beam decoder with C++ backend.
@@ -130,6 +147,61 @@ class CTCBeamDecoder(_Decoder):
             lexicon_fst_path,
         )
 
+    @staticmethod
+    def sort_hotwords_by_length(
+        hotwords_id: list[list[int]], hotwords_weight: list[float]
+    ) -> Tuple[list[list[int]], list[float]]:
+        """
+        Sort hotwords by their length in ascending order.
+
+        Parameters
+        ----------
+        hotwords_id: list[list[int]]
+            List of hotword tokens, where each inner list contains the token ids of the hotword.
+        hotwords_weight: list[float]
+            List of weights for each hotword token.
+
+        Returns
+        -------
+        sorted_hotwords_id: list[list[int]]
+            Sorted list of hotword tokens.
+        sorted_hotwords_weight: list[float]
+            Sorted list of weights corresponding to the sorted hotword tokens.
+        """
+        if len(hotwords_id) != len(hotwords_weight):
+            raise ValueError(
+                "Length of hotwords_id and hotwords_weight must be the same"
+            )
+
+        sorted_hws = sorted(
+            list(zip(hotwords_id, hotwords_weight)), key=lambda hw: len(hw[0])
+        )
+        return ([hw[0] for hw in sorted_hws], [hw[1] for hw in sorted_hws])
+
+    def get_hotwords_fst(
+        self,
+        hotwords_id: list[list[int]],
+        hotwords_weight: list[float],
+    ) -> _Fst:
+        """
+        Generate a hotword FST from the provided hotwords and their weights.
+
+        Parameters
+        ----------
+        hotwords_id: list[list[int]]
+            List of hotword tokens, where each inner list contains the token ids of the hotword.
+        hotwords_weight: list[float]
+            List of weights for each hotword token.
+
+        Returns
+        -------
+        hotwords_fst: _Fst
+            A finite state transducer representing the hotwords and their weights.
+        """
+        return self.generate_hw_fst(
+            *self.sort_hotwords_by_length(hotwords_id, hotwords_weight)
+        )
+
     def decode(
         self,
         logits: torch.Tensor,
@@ -203,6 +275,10 @@ class CTCBeamDecoder(_Decoder):
 
         if isinstance(hotwords_weight, float):
             hotwords_weight = [hotwords_weight] * len(hotwords_id)
+
+        hotwords_id, hotwords_weight = self.sort_hotwords_by_length(
+            hotwords_id, hotwords_weight
+        )
 
         sorted_indices = torch.argsort(logits, dim=2, descending=True).to(
             "cpu", torch.int32
@@ -380,20 +456,3 @@ class CTCBeamDecoder(_Decoder):
         assert (
             vocab_size >= cutoff_top_n > 0
         ), "Cutoff top N must be between 1 and vocab size"
-
-
-class ZFST(_ZFST):
-    """
-    Lexicon FST builder for CTC decoder.
-
-    Parameters
-    ----------
-    vocab_path: str
-        Path to the vocabulary file.
-    fst_path: Optional[str] = None
-        Path to the output existing build FST file. If not provided,
-        the FST will be initialized clean and empty.
-    """
-
-    def __init__(self, vocab_path: str, fst_path: Optional[str] = None):
-        super().__init__(vocab_path, fst_path)

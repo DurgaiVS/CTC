@@ -287,8 +287,8 @@ void
 zctc::populate_hotword_fst(fst::StdVectorFst* fst, const std::vector<std::vector<int>>& hotwords,
 						   const std::vector<float>& hotwords_weight)
 {
-	int token;
-	float hotword_weight, hotword_split;
+	int token, hotword_len, hw_completion_ratio_container;
+	float hotword_weight, hotword_split, hw_completion_ratio;
 	fst::StdVectorFst::StateId state, next_state;
 	fst::SortedMatcher<fst::StdVectorFst> matcher(fst, fst::MATCH_INPUT);
 
@@ -297,6 +297,7 @@ zctc::populate_hotword_fst(fst::StdVectorFst* fst, const std::vector<std::vector
 	for (int i = 0; i < hotwords.size(); i++) {
 		const std::vector<int>& tokens = hotwords[i];
 		hotword_weight = hotwords_weight[i];
+		hotword_len = tokens.size();
 		state = fst->Start();
 
 		for (int j = 0; j < tokens.size();) {
@@ -304,12 +305,15 @@ zctc::populate_hotword_fst(fst::StdVectorFst* fst, const std::vector<std::vector
 			matcher.SetState(state);
 			j++;
 
+			hw_completion_ratio = (float)j / (float)hotword_len;
+			std::memcpy(&hw_completion_ratio_container, &hw_completion_ratio, sizeof(float));
+
 			if (matcher.Find(token)) {
 				state = matcher.Value().nextstate;
 				continue;
 			} else {
 				next_state = fst->AddState();
-				fst->AddArc(state, fst::StdArc(token, j, hotword_weight, next_state));
+				fst->AddArc(state, fst::StdArc(token, hw_completion_ratio_container, hotword_weight, next_state));
 				state = next_state;
 				continue;
 			}

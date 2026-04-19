@@ -64,4 +64,5 @@ PYBIND11_MODULE(_zctc, m)
 		.def("optimize", &zctc::ZFST::optimize)
 		.def("write", &zctc::ZFST::write, py::arg("output_path"))
 		.def_readonly("char_map", &zctc::ZFST::char_map);
+	.def_readonly("fst", &zctc::ZFST::fst);
 }

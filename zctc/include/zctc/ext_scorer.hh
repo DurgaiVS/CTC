@@ -14,6 +14,7 @@ public:
 	const char tok_sep;
 	const int apostrophe_id;
 	const float alpha, beta, lex_penalty;
+	lm::WordIndex unk_lm_tok_id;
 	lm::base::Model* lm;
 	fst::StdVectorFst* lexicon;
 
@@ -31,6 +32,7 @@ public:
 
 		if (lm_path)
 			this->lm = lm::ngram::LoadVirtual(lm_path);
+		this->unk_lm_tok_id = this->lm->BaseVocabulary().NotFound();
 
 		if (lexicon_path)
 			this->lexicon = fst::StdVectorFst::Read(lexicon_path);
@@ -50,8 +52,6 @@ public:
 	template <typename T>
 	inline void initialise_start_states(zctc::Node<T>* root, fst::StdVectorFst* hotwords_fst) const;
 
-	int shortest_eos_from(fst::StdVectorFst* hotwords_fst, fst::SortedMatcher<fst::StdVectorFst>* hotwords_matcher,
-						  fst::StdVectorFst::StateId state) const;
 	template <typename T>
 	void run_ext_scoring(zctc::Node<T>* node, fst::SortedMatcher<fst::StdVectorFst>* lexicon_matcher,
 						 fst::StdVectorFst* hotwords_fst,
@@ -115,36 +115,6 @@ zctc::ExternalScorer::initialise_start_states(zctc::Node<T>* root, fst::StdVecto
 }
 
 /**
- * @brief Calculates the shortest distance to the end of sentence from the provided state in the provided FST.
- *
- * @param fst The FST to be used for the search.
- * @param state The state from which the shortest distance to the end of sentence is to be calculated.
- *
- * @return int The shortest distance to the end of sentence from the provided state in the provided FST.
- */
-int
-zctc::ExternalScorer::shortest_eos_from(fst::StdVectorFst* hotwords_fst,
-										fst::SortedMatcher<fst::StdVectorFst>* hotwords_matcher,
-										fst::StdVectorFst::StateId state) const
-{
-	bool final = false;
-	int hop_count = 0;
-
-	for (; !final; hop_count++) {
-		auto final_w = hotwords_fst->Final(state);
-		if (final_w != fst::StdArc::Weight::Zero()) {
-			final = true;
-			continue;
-		}
-
-		hotwords_matcher->SetState(state);
-		hotwords_matcher->Next();
-		state = hotwords_matcher->state_;
-	}
-	return hop_count;
-}
-
-/**
  * @brief Run the external scoring for the provided node, considering the
  * 		  language model, lexicon, hotwords FSTs and beta word penalty
  * 		  using the external scorer parameters.
@@ -167,7 +137,7 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* node, fst::SortedMatcher<fs
 
 		lm::WordIndex word_id = this->lm->BaseVocabulary().Index(node->token);
 
-		if (word_id == this->lm->BaseVocabulary().NotFound()) {
+		if (word_id == this->unk_lm_tok_id) {
 			node->lm_lex_score += -1000; // OOV char
 		} else {
 			/**
@@ -203,25 +173,31 @@ zctc::ExternalScorer::run_ext_scoring(zctc::Node<T>* node, fst::SortedMatcher<fs
 		hotwords_matcher->SetState(state);
 
 		if (hotwords_matcher->Find(node->id)) {
+			float hw_completion_ration;
 			const fst::StdArc& arc = hotwords_matcher->Value();
 			/**
 			 * NOTE: Here,
-			 * 		 arc.olabel is the token length so far in the hotword,
-			 * 		 arc.weight.Value() is the weight for each hotword token.
+			 * 		 arc.olabel is the token completion ratio so far in the hotword,
+			 * 		 arc.weight.Value() is the weight for that hotword.
 			 */
 			node->hotword_state = arc.nextstate;
-			int remaining_hopcount = this->shortest_eos_from(hotwords_fst, hotwords_matcher, node->hotword_state);
-			node->hw_score = zctc::quadratic_hw_score(arc.olabel, arc.olabel + remaining_hopcount, arc.weight.Value());
+			std::memcpy(&hw_completion_ration, &(arc.olabel), sizeof(float));
+			node->hw_score = zctc::quadratic_hw_score(hw_completion_ration, arc.weight.Value());
 			node->is_hotpath = true;
 
 		} else if (node->is_start_of_word) {
 			hotwords_matcher->SetState(node->hotword_state);
 			if (hotwords_matcher->Find(node->id)) {
+				float hw_completion_ration;
 				const fst::StdArc& arc = hotwords_matcher->Value();
 				node->hotword_state = arc.nextstate;
-				int remaining_hopcount = this->shortest_eos_from(hotwords_fst, hotwords_matcher, node->hotword_state);
-				node->hw_score
-					= zctc::quadratic_hw_score(arc.olabel, arc.olabel + remaining_hopcount, arc.weight.Value());
+				/**
+				 * NOTE: Since the output label of an arc should be an integer,
+				 * 		 we're byte-level casting the float hotword completion ratio to an integer,
+				 * 		 and then recasting it back to float here.
+				 */
+				std::memcpy(&hw_completion_ration, &(arc.olabel), sizeof(float));
+				node->hw_score = zctc::quadratic_hw_score(hw_completion_ration, arc.weight.Value());
 				node->is_hotpath = true;
 			}
 		}
