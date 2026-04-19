@@ -211,10 +211,10 @@ class CTCBeamDecoder(_Decoder):
         hotwords_fst: _Fst = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Expecting the logits to be softmaxed and not in log scale.
-        NOTE: Hotwords provided should be sorted in descending order
-              based on their weights, and for same weight, should be
-              sorted in ascending order based on the length of the token.
+        Performs CTC based beam decoding of the input logits with optional
+        hotword boosting, lexicon FST, and language model scoring.
+
+        NOTE:Expecting the logits to be softmaxed and not in log scale.
 
         Parameters
         ----------
